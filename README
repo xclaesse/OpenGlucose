@@ -1,0 +1,23 @@
+OpenGlucose
+===========
+
+OpenGlucose is an application for diabetics that reads data from supported
+glucometer devices and display statistics and graphs.
+
+DISCLAIMER
+==========
+
+This is NOT a medical application, there is NO GUARANTEE the information is
+correct. Please use the official application of your device for any medical
+purpose. Since this application is made by reverse-engineering it could contain
+critical bugs.
+
+SUPPORTED DEVICES
+=================
+
+ - Abbott FreeStyle InsuLinx
+
+Please contribute to this project if you own another device. Sending USB logs[1]
+from the windows application can help.
+
+[1] http://sourceforge.net/projects/usbsnoop/
