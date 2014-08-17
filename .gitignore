@@ -15,6 +15,7 @@ Makefile
 *.pyc
 *.loT
 .semanticache
+.dirstamp
 
 stamp-h1
 xmldocs.make
@@ -55,4 +56,4 @@ m4/ltversion.m4
 m4/lt~obsolete.m4
 m4/ltsugar.m4
 
-src/openglucose
+openglucose
