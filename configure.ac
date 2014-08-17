@@ -25,7 +25,7 @@ AC_INIT([OpenGlucose], [openglucose_version], [])
 
 AC_CONFIG_MACRO_DIR([m4])
 
-AM_INIT_AUTOMAKE([1.11 -Wno-portability])
+AM_INIT_AUTOMAKE([1.11 -Wno-portability foreign subdir-objects])
 AC_CONFIG_HEADERS(config.h)
 
 AM_SILENT_RULES
@@ -34,8 +34,7 @@ dnl check for tools
 AC_PROG_CC
 AC_PROG_CC_STDC
 AC_PROG_INSTALL
-AC_PROG_LIBTOOL
-AM_PROG_LIBTOOL
+LT_INIT
 AC_PROG_MKDIR_P
 PKG_PROG_PKG_CONFIG([0.21])
 
@@ -57,7 +56,7 @@ ifelse(openglucose_nano_version, 0,
   # disable extra checks by default
   official_release=yes
   AC_ARG_ENABLE([fatal-warnings],
-    [AC_HELP_STRING([--enable-fatal-warnings],
+    [AS_HELP_STRING([--enable-fatal-warnings],
                     [make various warnings fatal])],
     [],
     [enable_fatal_warnings=no])
@@ -66,7 +65,7 @@ ifelse(openglucose_nano_version, 0,
   # enable extra checks by default
   official_release=no
   AC_ARG_ENABLE([fatal-warnings],
-    [AC_HELP_STRING([--disable-fatal-warnings],
+    [AS_HELP_STRING([--disable-fatal-warnings],
                     [make various warnings non-fatal])],
     [],
     [enable_fatal_warnings=yes])
@@ -111,14 +110,10 @@ PKG_CHECK_MODULES(OPENGLUCOSE,
 AM_CONDITIONAL([OFFICIAL_RELEASE], [test "x$official_release" = xyes])
 
 AC_ARG_ENABLE(debug,
-  AC_HELP_STRING([--disable-debug],[compile without debug code (note that this will disable much of the debug code in all GLib connection managers)]),
+  AS_HELP_STRING([--disable-debug],[compile without debug code (note that this will disable much of the debug code in all GLib connection managers)]),
     enable_debug=$enableval, enable_debug=yes )
 
 AS_IF([test x$enable_debug = xyes],
   [AC_DEFINE([ENABLE_DEBUG], [], [Enable debug code])])
 
-AC_OUTPUT(
-  m4/Makefile \
-  Makefile \
-  src/Makefile \
-)
+AC_OUTPUT(Makefile)
