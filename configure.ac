@@ -116,4 +116,9 @@ AC_ARG_ENABLE(debug,
 AS_IF([test x$enable_debug = xyes],
   [AC_DEFINE([ENABLE_DEBUG], [], [Enable debug code])])
 
+AC_MSG_CHECKING([udev dir])
+UDEV_DIR=`pkg-config --variable=udevdir udev`
+AC_MSG_RESULT([$UDEV_DIR])
+AC_SUBST(UDEV_DIR)
+
 AC_OUTPUT(Makefile)

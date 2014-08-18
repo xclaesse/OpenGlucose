@@ -4,6 +4,7 @@ DISTCHECK_CONFIGURE_FLAGS = --disable-debug
 
 EXTRA_DIST = \
 	autogen.sh \
+	data/60-insulinx.rules \
 	m4/compiler.m4 \
 	m4/linker.m4 \
 	m4/tp-compiler-flag.m4 \
@@ -32,3 +33,7 @@ openglucose_SOURCES = \
 openglucose_LDADD = $(OPENGLUCOSE_LIBS)
 
 doc_DATA = README AUTHORS COPYING
+
+udevdir = $(UDEV_DIR)/rules.d
+udev_DATA = data/60-insulinx.rules
+
