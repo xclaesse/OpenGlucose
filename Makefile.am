@@ -11,12 +11,6 @@ EXTRA_DIST = \
 	m4/tp-compiler-warnings.m4 \
 	$(NULL)
 
-CLEANFILES = FIXME.out
-
-check-local::
-	egrep -A 5 '[F]IXME|[T]ODO|[X]XX' $(srcdir)/folks/*.[ch] \
-		> FIXME.out || true
-
 AM_CPPFLAGS = \
 	$(OPENGLUCOSE_CFLAGS) \
 	$(ERROR_CFLAGS) \
