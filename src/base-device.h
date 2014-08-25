@@ -3,7 +3,7 @@
 
 #include <gusb.h>
 
-#include "device-info.h"
+#include "record.h"
 
 G_BEGIN_DECLS
 
@@ -36,26 +36,56 @@ struct _OgBaseDevice {
 struct _OgBaseDeviceClass {
   GObjectClass parent_class;
 
-  void (*fetch_device_info_async) (OgBaseDevice *self,
+  /* Must always return non-empty, human-readable string */
+  const gchar *(*get_name) (OgBaseDevice *self);
+
+  void (*refresh_device_info_async) (OgBaseDevice *self,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
     gpointer user_data);
-  OgDeviceInfo *(*fetch_device_info_finish) (OgBaseDevice *self,
+  gboolean (*refresh_device_info_finish) (OgBaseDevice *self,
     GAsyncResult *result,
     GError **error);
+
+  /* Those vfunc can return NULL until the first call to
+   * refresh_device_info_async() succeeds */
+  const gchar *(*get_serial_number) (OgBaseDevice *self);
+  GDateTime *(*get_clock) (OgBaseDevice *self,
+      GDateTime **system_clock);
+  OgRecord **(*get_records) (OgBaseDevice *self);
 };
+
+typedef enum
+{
+  OG_BASE_DEVICE_STATUS_NONE,
+  OG_BASE_DEVICE_STATUS_REFRESHING,
+  OG_BASE_DEVICE_STATUS_READY,
+  OG_BASE_DEVICE_STATUS_FAILED,
+} OgBaseDeviceStatus;
+#define OG_LAST_BASE_DEVICE_STATUS OG_BASE_DEVICE_STATUS_REFRESHING
 
 GType og_base_device_get_type (void) G_GNUC_CONST;
 
-GUsbDevice *og_base_device_get_usb_device (OgBaseDevice *self);
+OgBaseDeviceStatus og_base_device_get_status (OgBaseDevice *self);
+void og_base_device_change_status (OgBaseDevice *self,
+    OgBaseDeviceStatus status);
 
-void og_base_device_fetch_device_info_async (OgBaseDevice *self,
+/* Virtual methods */
+
+const gchar *og_base_device_get_name (OgBaseDevice *self);
+
+void og_base_device_refresh_device_info_async (OgBaseDevice *self,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
     gpointer user_data);
-OgDeviceInfo *og_base_device_fetch_device_info_finish (OgBaseDevice *self,
+gboolean og_base_device_refresh_device_info_finish (OgBaseDevice *self,
     GAsyncResult *result,
     GError **error);
+
+const gchar *og_base_device_get_serial_number (OgBaseDevice *self);
+GDateTime *og_base_device_get_clock (OgBaseDevice *self,
+    GDateTime **system_clock);
+OgRecord **og_base_device_get_records (OgBaseDevice *self);
 
 G_END_DECLS
 

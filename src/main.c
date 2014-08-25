@@ -5,6 +5,7 @@
 
 #include "base-device.h"
 #include "insulinx.h"
+#include "main-window.h"
 
 typedef struct
 {
@@ -20,8 +21,10 @@ static SupportedDevice supported_devices[] = {
 
 typedef struct
 {
-  GApplication parent;
+  GtkApplication parent;
 
+  GtkWidget *window;
+  /* Owned GUsbDevice -> owned OgBaseDevice */
   GHashTable *devices_table;
   GUsbContext *context;
   GUsbDeviceList *list;
@@ -29,49 +32,12 @@ typedef struct
 
 typedef struct
 {
-  GApplicationClass parent;
+  GtkApplicationClass parent;
 } OgApplicationClass;
 
 #define OG_TYPE_APPLICATION (og_application_get_type ())
 GType og_application_get_type (void) G_GNUC_CONST;
-G_DEFINE_TYPE (OgApplication, og_application, G_TYPE_APPLICATION)
-
-static void
-fetch_device_info_cb (GObject *source,
-    GAsyncResult *result,
-    gpointer user_data)
-{
-  OgBaseDevice *base = (OgBaseDevice *) source;
-  OgDeviceInfo *info;
-  gchar *str;
-  guint i;
-  GError *error = NULL;
-
-  info = og_base_device_fetch_device_info_finish (base, result, &error);
-  if (info == NULL)
-    {
-      g_warning ("Error getting device info: %s", error->message);
-      g_clear_error (&error);
-      return;
-    }
-
-  g_print ("Got device info for %s:\n", info->serial_number);
-
-  str = g_date_time_format (info->datetime, "%x %X");
-  g_print ("  Device time: %s\n", str);
-  g_free (str);
-
-  for (i = 0; i < info->records->len; i++)
-    {
-      OgRecord *record = g_ptr_array_index (info->records, i);
-
-      str = g_date_time_format (record->datetime, "%x %X");
-      g_print ("  %s, glycemia: %u\n", str, record->glycemia);
-      g_free (str);
-    }
-
-  og_device_info_free (info);
-}
+G_DEFINE_TYPE (OgApplication, og_application, GTK_TYPE_APPLICATION)
 
 static void
 add_device (OgApplication *self,
@@ -93,9 +59,7 @@ add_device (OgApplication *self,
           g_hash_table_insert (self->devices_table,
               g_object_ref (device),
               base);
-
-          og_base_device_fetch_device_info_async (base, NULL,
-              fetch_device_info_cb, self);
+          og_main_window_add_device ((OgMainWindow *) self->window, base);
           break;
         }
     }
@@ -105,7 +69,14 @@ static void
 remove_device (OgApplication *self,
     GUsbDevice *device)
 {
-  g_hash_table_remove (self->devices_table, device);
+  OgBaseDevice *base;
+
+  base = g_hash_table_lookup (self->devices_table, device);
+  if (base != NULL)
+    {
+      og_main_window_remove_device ((OgMainWindow *) self->window, base);
+      g_hash_table_remove (self->devices_table, device);
+    }
 }
 
 static void
@@ -116,7 +87,10 @@ startup (GApplication *app)
   guint i;
   GError *error = NULL;
 
-  g_application_hold (app);
+  G_APPLICATION_CLASS (og_application_parent_class)->startup (app);
+
+  self->window = og_main_window_new ((GtkApplication *) self);
+  gtk_widget_show (self->window);
 
   self->devices_table = g_hash_table_new_full (g_direct_hash, g_direct_equal,
       g_object_unref, g_object_unref);
@@ -137,8 +111,6 @@ startup (GApplication *app)
       G_CALLBACK (add_device), self);
   g_signal_connect_swapped (self->list, "device-removed",
       G_CALLBACK (remove_device), self);
-
-  G_APPLICATION_CLASS (og_application_parent_class)->startup (app);
 }
 
 static void
@@ -156,6 +128,10 @@ shutdown (GApplication *app)
 static void
 activate (GApplication *app)
 {
+  OgApplication *self = (OgApplication *) app;
+
+  gtk_window_present (GTK_WINDOW (self->window));
+
   G_APPLICATION_CLASS (og_application_parent_class)->activate (app);
 }
 

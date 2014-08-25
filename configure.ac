@@ -96,12 +96,20 @@ AC_DEFINE([GLIB_VERSION_MAX_ALLOWED], [GLIB_VERSION_2_40], [Prevent post 2.40 AP
 GUSB_REQUIRED=0.1.6
 AC_DEFINE([G_USB_API_IS_SUBJECT_TO_CHANGE], [1], [Acknowledge that it is unstable API])
 
+GTK_REQUIRED=3.10
+AC_DEFINE([GTK_VERSION_MIN_REQUIRED], [GLIB_VERSION_3_10], [Ignore post 3.10 deprecations])
+AC_DEFINE([GTK_VERSION_MAX_ALLOWED], [GLIB_VERSION_3_10], [Prevent post 3.10 APIs])
+
+WEBKIT_REQUIRED=2.4.3
+
 PKG_CHECK_MODULES(OPENGLUCOSE,
 [
   glib-2.0 >= $GLIB_REQUIRED
   gobject-2.0 >= $GLIB_REQUIRED
   gio-2.0 >= $GLIB_REQUIRED
   gusb >= $GUSB_REQUIRED
+  gtk+-3.0 >= $GTK_REQUIRED
+  webkit2gtk-3.0 >= WEBKIT_REQUIRED
 ])
 
 # Only use this where we really do want things to depend on whether it's
@@ -120,5 +128,8 @@ AC_MSG_CHECKING([udev dir])
 UDEV_DIR=`pkg-config --variable=udevdir udev`
 AC_MSG_RESULT([$UDEV_DIR])
 AC_SUBST(UDEV_DIR)
+
+GLIB_COMPILE_RESOURCES=`$PKG_CONFIG gio-2.0 --variable=glib_compile_resources`
+AC_SUBST(GLIB_COMPILE_RESOURCES)
 
 AC_OUTPUT(Makefile)

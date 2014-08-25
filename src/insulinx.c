@@ -10,6 +10,39 @@ G_DEFINE_TYPE (OgInsulinx, og_insulinx, OG_TYPE_BASE_DEVICE)
 
 #define BUFFER_SIZE 64
 
+struct _OgInsulinxPrivate
+{
+  GUsbDevice *usb_device;
+
+  GQueue refresh_tasks;
+  gint state;
+  guint8 buffer[BUFFER_SIZE];
+
+  gchar *serial_number;
+  GDateTime *device_clock;
+  GDateTime *system_clock;
+  GPtrArray *records;
+
+  guint year, month, day;
+};
+
+enum
+{
+  PROP_0,
+  PROP_USB_DEVICE,
+};
+
+typedef enum
+{
+  OG_INSULINX_ERROR_CMD_FAILED,
+  OG_INSULINX_ERROR_PARSER,
+  OG_INSULINX_ERROR_FETCH_ONGOING,
+} OgInsulinxError;
+
+#define OG_INSULINX_ERROR og_insulinx_error_quark()
+GQuark og_insulinx_error_quark (void);
+G_DEFINE_QUARK (og-insulinx-error-quark, og_insulinx_error)
+
 /* Known commands:
  * $time?, $date?, $serlnum?, $ptname?, $ptid?, $lang?, $clktyp?, $taglang?,
  * $custthm?, $tagorder?, $ntsound?, $wktrend?, $foodunits?, $carbratio?,
@@ -18,19 +51,15 @@ G_DEFINE_TYPE (OgInsulinx, og_insulinx, OG_TYPE_BASE_DEVICE)
  * $swver?, $frststrt?, $alllang?, $ioblog?, $actthm?, $tagsenbl?, $event?,
  * $inslock?
  */
-
-static gboolean parse_serial_number (OgInsulinx *self,
-    const gchar *msg,
-    GError **error);
-static gboolean parse_result (OgInsulinx *self,
-    const gchar *msg,
-    GError **error);
-static gboolean parse_date (OgInsulinx *self,
-    const gchar *msg,
-    GError **error);
-static gboolean parse_time (OgInsulinx *self,
-    const gchar *msg,
-    GError **error);
+#define DECLARE_PARSER(func) \
+  static gboolean parse_##func (OgInsulinx *self, \
+      const gchar *msg, \
+      GError **error)
+DECLARE_PARSER (serial_number);
+DECLARE_PARSER (result);
+DECLARE_PARSER (date);
+DECLARE_PARSER (time);
+#undef DECLARE_PARSER
 
 typedef struct
 {
@@ -51,29 +80,14 @@ static Request requests[] = {
   { 0x60, "$time?\r\n", parse_time },
 };
 
-struct _OgInsulinxPrivate
+static void
+clear_device_info (OgInsulinx *self)
 {
-  /* Borrowed */
-  GUsbDevice *usb_device;
-
-  GTask *task;
-  gint state;
-  guint8 buffer[BUFFER_SIZE];
-
-  OgDeviceInfo *info;
-  guint year, month, day;
-};
-
-typedef enum
-{
-  OG_INSULINX_ERROR_CMD_FAILED,
-  OG_INSULINX_ERROR_PARSER,
-  OG_INSULINX_ERROR_FETCH_ONGOING,
-} OgInsulinxError;
-
-#define OG_INSULINX_ERROR og_insulinx_error_quark()
-GQuark og_insulinx_error_quark (void);
-G_DEFINE_QUARK (og-insulinx-error-quark, og_insulinx_error)
+  g_clear_pointer (&self->priv->serial_number, g_free);
+  g_clear_pointer (&self->priv->device_clock, g_date_time_unref);
+  g_clear_pointer (&self->priv->system_clock, g_date_time_unref);
+  g_clear_pointer (&self->priv->records, g_ptr_array_unref);
+}
 
 static void
 og_insulinx_init (OgInsulinx *self)
@@ -81,6 +95,46 @@ og_insulinx_init (OgInsulinx *self)
   self->priv = G_TYPE_INSTANCE_GET_PRIVATE (self,
       OG_TYPE_INSULINX, OgInsulinxPrivate);
   self->priv->state = -1;
+  g_queue_init (&self->priv->refresh_tasks);
+}
+
+static void
+get_property (GObject *object,
+    guint property_id,
+    GValue *value,
+    GParamSpec *pspec)
+{
+  OgInsulinx *self = (OgInsulinx *) object;
+
+  switch (property_id)
+    {
+      case PROP_USB_DEVICE:
+        g_value_set_object (value, self->priv->usb_device);
+        break;
+      default:
+        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
+        break;
+    }
+}
+
+static void
+set_property (GObject *object,
+    guint property_id,
+    const GValue *value,
+    GParamSpec *pspec)
+{
+  OgInsulinx *self = (OgInsulinx *) object;
+
+  switch (property_id)
+    {
+      case PROP_USB_DEVICE:
+        g_assert (self->priv->usb_device == NULL);
+        self->priv->usb_device = g_value_dup_object (value);
+        break;
+      default:
+        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
+        break;
+    }
 }
 
 static void
@@ -89,12 +143,14 @@ constructed (GObject *object)
   OgInsulinx *self = (OgInsulinx *) object;
   GError *error = NULL;
 
-  g_debug ("New Abbott FreeStyle InsuLinx device");
-
   G_OBJECT_CLASS (og_insulinx_parent_class)->constructed (object);
 
-  self->priv->usb_device = og_base_device_get_usb_device (
-      (OgBaseDevice *) self);
+  g_assert (self->priv->usb_device != NULL);
+  if (!g_usb_device_open (self->priv->usb_device, &error))
+    {
+      g_warning ("Error opening device: %s", error->message);
+      goto out;
+    }
 
   if (!g_usb_device_claim_interface (self->priv->usb_device, 0,
           G_USB_DEVICE_CLAIM_INTERFACE_BIND_KERNEL_DRIVER,
@@ -131,14 +187,23 @@ out:
   g_clear_error (&error);
 }
 
-static void fetch_next (OgInsulinx *self);
-
 static void
-fetch_device_info_reset (OgInsulinx *self)
+dispose (GObject *object)
 {
-    g_clear_object (&self->priv->task);
-    g_clear_pointer (&self->priv->info, og_device_info_free);
-    self->priv->state = -1;
+  OgInsulinx *self = (OgInsulinx *) object;
+  GError *error = NULL;
+
+  clear_device_info (self);
+
+  if (self->priv->usb_device != NULL)
+    {
+      if (!g_usb_device_close (self->priv->usb_device, &error))
+        g_warning ("Error closing device: %s", error->message);
+      g_clear_error (&error);
+    }
+  g_clear_object (&self->priv->usb_device);
+
+  G_OBJECT_CLASS (og_insulinx_parent_class)->dispose (object);
 }
 
 static gboolean
@@ -146,15 +211,7 @@ parse_serial_number (OgInsulinx *self,
     const gchar *msg,
     GError **error)
 {
-  if (sscanf (msg, "%ms\r\n", &self->priv->info->serial_number) != 1)
-    {
-      self->priv->info->serial_number = NULL;
-      g_set_error (error, OG_INSULINX_ERROR,
-          OG_INSULINX_ERROR_PARSER,
-          "Error parsing serial number");
-      return FALSE;
-    }
-
+  self->priv->serial_number = g_strdup (msg);
   return TRUE;
 }
 
@@ -167,7 +224,7 @@ parse_result (OgInsulinx *self,
   guint ignore;
   gint n_parsed;
 
-  n_parsed = sscanf (msg, "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\r\n",
+  n_parsed = sscanf (msg, "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
       &type,
       &ignore, /* FIXME: What is that? */
       &month, &day, &year,
@@ -194,7 +251,9 @@ parse_result (OgInsulinx *self,
       return FALSE;
     }
 
-  g_ptr_array_add (self->priv->info->records,
+  year += 2000;
+
+  g_ptr_array_add (self->priv->records,
       og_record_new (year, month, day, hour, minute, glycemia));
 
   return TRUE;
@@ -206,7 +265,7 @@ parse_date (OgInsulinx *self,
     GError **error)
 {
   /* Temporaly store those values, we'll create the GDateTime in next state. */
-  if (sscanf (msg, "%u,%u,%u\r\n", &self->priv->month, &self->priv->day,
+  if (sscanf (msg, "%u,%u,%u", &self->priv->month, &self->priv->day,
           &self->priv->year) != 3)
     {
       g_set_error (error, OG_INSULINX_ERROR,
@@ -214,6 +273,8 @@ parse_date (OgInsulinx *self,
           "Error parsing date");
       return FALSE;
     }
+
+  self->priv->year += 2000;
 
   return TRUE;
 }
@@ -225,7 +286,7 @@ parse_time (OgInsulinx *self,
 {
   guint hour, minute;
 
-  if (sscanf (msg, "%u,%u\r\n", &hour, &minute) != 2)
+  if (sscanf (msg, "%u,%u", &hour, &minute) != 2)
     {
       g_set_error (error, OG_INSULINX_ERROR,
           OG_INSULINX_ERROR_PARSER,
@@ -234,12 +295,48 @@ parse_time (OgInsulinx *self,
     }
 
   /* We should have parsed the date in previous state */
-  self->priv->info->datetime = g_date_time_new_local (
+  self->priv->device_clock = g_date_time_new_local (
       self->priv->year, self->priv->month, self->priv->day,
       hour, minute, 0);
+  self->priv->system_clock = g_date_time_new_now_local ();
 
   return TRUE;
 }
+
+static void
+refresh_return (OgInsulinx *self,
+    GError *error)
+{
+  GTask *task;
+
+  self->priv->state = -1;
+
+  if (error != NULL)
+    {
+      clear_device_info (self);
+      og_base_device_change_status ((OgBaseDevice *) self,
+          OG_BASE_DEVICE_STATUS_FAILED);
+    }
+  else
+    {
+      g_ptr_array_add (self->priv->records, NULL);
+      og_base_device_change_status ((OgBaseDevice *) self,
+          OG_BASE_DEVICE_STATUS_READY);
+    }
+
+  while ((task = g_queue_pop_head (&self->priv->refresh_tasks)) != NULL)
+    {
+      if (error != NULL)
+        g_task_return_error (task, g_error_copy (error));
+      else
+        g_task_return_boolean (task, TRUE);
+      g_object_unref (task);
+    }
+
+  g_clear_error (&error);
+}
+
+static void fetch_next (OgInsulinx *self);
 
 static void
 request_interrupt_transfer_cb (GObject *source,
@@ -258,8 +355,7 @@ request_interrupt_transfer_cb (GObject *source,
       &error);
   if (len < BUFFER_SIZE)
     {
-      g_task_return_error (self->priv->task, error);
-      fetch_device_info_reset (self);
+      refresh_return (self, error);
       return;
     }
 
@@ -271,7 +367,9 @@ request_interrupt_transfer_cb (GObject *source,
   msg = (gchar *) self->priv->buffer + 2;
   msg[msg_len] = '\0';
 
-  g_debug ("got msg: '%s'", msg);
+  g_strstrip (msg);
+
+  g_debug ("got msg code 0x%02x: '%s'", self->priv->buffer[0], msg);
 
   /* Check if more messages needs to be fetched */
   if (req->code == 0x60)
@@ -283,19 +381,19 @@ request_interrupt_transfer_cb (GObject *source,
           goto out;
         }
 
-      if (g_str_has_suffix (msg, "CMD FAIL!\r\n"))
+      if (g_str_has_suffix (msg, "CMD FAIL!"))
         {
-          g_task_return_new_error (self->priv->task,
+          g_set_error (&error,
               OG_INSULINX_ERROR,
               OG_INSULINX_ERROR_CMD_FAILED,
               "Command failed");
-          fetch_device_info_reset (self);
+          refresh_return (self, error);
           return;
         }
 
       /* If the message does NOT end with "CMD OK" then more messages
        * needs to be fetched */
-      if (!g_str_has_suffix (msg, "CMD OK\r\n"))
+      if (!g_str_has_suffix (msg, "CMD OK"))
         fetch_more = TRUE;
     }
 
@@ -304,8 +402,7 @@ request_interrupt_transfer_cb (GObject *source,
     {
       if (!req->parse (self, msg, &error))
         {
-          g_task_return_error (self->priv->task, error);
-          fetch_device_info_reset (self);
+          refresh_return (self, error);
           return;
         }
     }
@@ -317,7 +414,7 @@ out:
           0x81,
           self->priv->buffer, BUFFER_SIZE,
           0,
-          g_task_get_cancellable (self->priv->task),
+          NULL,
           request_interrupt_transfer_cb,
           self);
     }
@@ -340,8 +437,7 @@ request_control_transfer_cb (GObject *source,
       &error);
   if (len < BUFFER_SIZE)
     {
-      g_task_return_error (self->priv->task, error);
-      fetch_device_info_reset (self);
+      refresh_return (self, error);
       return;
     }
 
@@ -350,7 +446,7 @@ request_control_transfer_cb (GObject *source,
       0x81,
       self->priv->buffer, BUFFER_SIZE,
       0,
-      g_task_get_cancellable (self->priv->task),
+      NULL,
       request_interrupt_transfer_cb,
       self);
 }
@@ -365,13 +461,13 @@ fetch_next (OgInsulinx *self)
   g_assert (self->priv->state >= 0);
   g_assert ((guint) self->priv->state <= G_N_ELEMENTS (requests));
 
+  og_base_device_change_status ((OgBaseDevice *) self,
+      OG_BASE_DEVICE_STATUS_REFRESHING);
+
   /* Are we done? */
   if (self->priv->state == G_N_ELEMENTS (requests))
     {
-      g_task_return_pointer (self->priv->task,
-          self->priv->info, (GDestroyNotify) og_device_info_free);
-      self->priv->info = NULL;
-      fetch_device_info_reset (self);
+      refresh_return (self, NULL);
       return;
     }
 
@@ -394,13 +490,13 @@ fetch_next (OgInsulinx *self)
       0,
       self->priv->buffer, BUFFER_SIZE,
       0,
-      g_task_get_cancellable (self->priv->task),
+      NULL,
       request_control_transfer_cb,
       self);
 }
 
 static void
-fetch_device_info_async (OgBaseDevice *base,
+refresh_device_info_async (OgBaseDevice *base,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
     gpointer user_data)
@@ -412,34 +508,74 @@ fetch_device_info_async (OgBaseDevice *base,
   self = (OgInsulinx *) base;
 
   task = g_task_new (self, cancellable, callback, user_data);
+  g_queue_push_tail (&self->priv->refresh_tasks, task);
 
-  if (self->priv->state != -1)
+  if (self->priv->state == -1)
     {
-      g_task_return_new_error (task,
-          OG_INSULINX_ERROR,
-          OG_INSULINX_ERROR_FETCH_ONGOING,
-          "Device is already fetching information");
-      g_object_unref (task);
-      return;
+      clear_device_info (self);
+      self->priv->records = g_ptr_array_new_with_free_func (
+          (GDestroyNotify) og_record_free);
+      fetch_next (self);
     }
-
-  g_assert (self->priv->task == NULL);
-  g_assert (self->priv->info == NULL);
-  self->priv->task = task;
-  self->priv->info = og_device_info_new ();
-
-  fetch_next (self);
 }
 
-static OgDeviceInfo *
-fetch_device_info_finish (OgBaseDevice *base,
+static gboolean
+refresh_device_info_finish (OgBaseDevice *base,
     GAsyncResult *result,
     GError **error)
 {
-  g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
-  g_return_val_if_fail (g_task_is_valid (result, base), NULL);
+  g_return_val_if_fail (OG_IS_INSULINX (base), FALSE);
+  g_return_val_if_fail (g_task_is_valid (result, base), FALSE);
 
-  return g_task_propagate_pointer (G_TASK (result), error);
+  return g_task_propagate_boolean (G_TASK (result), error);
+}
+
+static const gchar *
+get_name (OgBaseDevice *base)
+{
+  g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
+
+  return "Abbott FreeStyle InsuLinx";
+}
+
+static const gchar *
+get_serial_number (OgBaseDevice *base)
+{
+  OgInsulinx *self;
+
+  g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
+  self = (OgInsulinx *) base;
+
+  return self->priv->serial_number;
+}
+
+static GDateTime *
+get_clock (OgBaseDevice *base,
+    GDateTime **system_clock)
+{
+  OgInsulinx *self;
+
+  g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
+  self = (OgInsulinx *) base;
+
+  if (system_clock != NULL)
+    *system_clock = self->priv->system_clock;
+
+  return self->priv->device_clock;
+}
+
+static OgRecord **
+get_records (OgBaseDevice *base)
+{
+  OgInsulinx *self;
+
+  g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
+  self = (OgInsulinx *) base;
+
+  if (self->priv->records == NULL)
+    return NULL;
+
+  return (OgRecord **) self->priv->records->pdata;
 }
 
 static void
@@ -447,12 +583,28 @@ og_insulinx_class_init (OgInsulinxClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
   OgBaseDeviceClass *base_class = OG_BASE_DEVICE_CLASS (klass);
+  GParamSpec *param_spec;
 
   object_class->constructed = constructed;
-  base_class->fetch_device_info_async = fetch_device_info_async;
-  base_class->fetch_device_info_finish = fetch_device_info_finish;
+  object_class->dispose = dispose;
+  object_class->get_property = get_property;
+  object_class->set_property = set_property;
+
+  base_class->get_name = get_name;
+  base_class->refresh_device_info_async = refresh_device_info_async;
+  base_class->refresh_device_info_finish = refresh_device_info_finish;
+  base_class->get_serial_number = get_serial_number;
+  base_class->get_clock = get_clock;
+  base_class->get_records = get_records;
 
   g_type_class_add_private (object_class, sizeof (OgInsulinxPrivate));
+
+  param_spec = g_param_spec_object ("usb-device",
+      "USB Device",
+      "The #GUsbDevice associated with this glucometer",
+      G_USB_TYPE_DEVICE,
+      G_PARAM_STATIC_STRINGS | G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+  g_object_class_install_property (object_class, PROP_USB_DEVICE, param_spec);
 }
 
 OgBaseDevice *

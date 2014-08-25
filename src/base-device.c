@@ -8,13 +8,13 @@ G_DEFINE_ABSTRACT_TYPE (OgBaseDevice, og_base_device, G_TYPE_OBJECT)
 
 struct _OgBaseDevicePrivate
 {
-  GUsbDevice *usb_device;
+  OgBaseDeviceStatus status;
 };
 
 enum
 {
   PROP_0,
-  PROP_USB_DEVICE,
+  PROP_STATUS,
 };
 
 static void
@@ -28,31 +28,10 @@ static void
 constructed (GObject *object)
 {
   OgBaseDevice *self = (OgBaseDevice *) object;
-  GError *error = NULL;
 
   G_OBJECT_CLASS (og_base_device_parent_class)->constructed (object);
 
-  g_assert (self->priv->usb_device != NULL);
-  if (!g_usb_device_open (self->priv->usb_device, &error))
-    g_warning ("Error opening device: %s", error->message);
-  g_clear_error (&error);
-}
-
-static void
-dispose (GObject *object)
-{
-  OgBaseDevice *self = (OgBaseDevice *) object;
-  GError *error = NULL;
-
-  if (self->priv->usb_device != NULL)
-    {
-      if (!g_usb_device_close (self->priv->usb_device, &error))
-        g_warning ("Error closing device: %s", error->message);
-      g_clear_error (&error);
-    }
-  g_clear_object (&self->priv->usb_device);
-
-  G_OBJECT_CLASS (og_base_device_parent_class)->dispose (object);
+  g_debug ("New device: %s", og_base_device_get_name (self));
 }
 
 static void
@@ -65,28 +44,8 @@ get_property (GObject *object,
 
   switch (property_id)
     {
-      case PROP_USB_DEVICE:
-        g_value_set_object (value, self->priv->usb_device);
-        break;
-      default:
-        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
-        break;
-    }
-}
-
-static void
-set_property (GObject *object,
-    guint property_id,
-    const GValue *value,
-    GParamSpec *pspec)
-{
-  OgBaseDevice *self = (OgBaseDevice *) object;
-
-  switch (property_id)
-    {
-      case PROP_USB_DEVICE:
-        g_assert (self->priv->usb_device == NULL);
-        self->priv->usb_device = g_value_dup_object (value);
+      case PROP_STATUS:
+        g_value_set_uint (value, self->priv->status);
         break;
       default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -101,30 +60,56 @@ og_base_device_class_init (OgBaseDeviceClass *klass)
   GParamSpec *param_spec;
 
   object_class->constructed = constructed;
-  object_class->dispose = dispose;
   object_class->get_property = get_property;
-  object_class->set_property = set_property;
 
   g_type_class_add_private (object_class, sizeof (OgBaseDevicePrivate));
 
-  param_spec = g_param_spec_object ("usb-device",
-      "usb-device",
-      "The GUSbDevice.",
-      G_USB_TYPE_DEVICE,
-      G_PARAM_STATIC_STRINGS | G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
-  g_object_class_install_property (object_class, PROP_USB_DEVICE, param_spec);
+  param_spec = g_param_spec_uint ("status",
+      "Status",
+      "The current status of this device",
+      OG_BASE_DEVICE_STATUS_NONE,
+      OG_LAST_BASE_DEVICE_STATUS,
+      OG_BASE_DEVICE_STATUS_NONE,
+      G_PARAM_STATIC_STRINGS | G_PARAM_READABLE);
+  g_object_class_install_property (object_class, PROP_STATUS, param_spec);
 }
 
-GUsbDevice *
-og_base_device_get_usb_device (OgBaseDevice *self)
+OgBaseDeviceStatus
+og_base_device_get_status (OgBaseDevice *self)
 {
-  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), OG_BASE_DEVICE_STATUS_NONE);
 
-  return self->priv->usb_device;
+  return self->priv->status;
 }
 
 void
-og_base_device_fetch_device_info_async (OgBaseDevice *self,
+og_base_device_change_status (OgBaseDevice *self,
+    OgBaseDeviceStatus status)
+{
+  g_return_if_fail (OG_IS_BASE_DEVICE (self));
+
+  if (status == self->priv->status)
+    return;
+
+  self->priv->status = status;
+  g_object_notify ((GObject *) self, "status");
+}
+
+const gchar *
+og_base_device_get_name (OgBaseDevice *self)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_val_if_fail (klass->get_name != NULL, NULL);
+
+  return klass->get_name (self);
+}
+
+void
+og_base_device_refresh_device_info_async (OgBaseDevice *self,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
     gpointer user_data)
@@ -135,23 +120,63 @@ og_base_device_fetch_device_info_async (OgBaseDevice *self,
   g_return_if_fail (cancellable == NULL || G_IS_CANCELLABLE (cancellable));
 
   klass = OG_BASE_DEVICE_GET_CLASS (self);
-  g_return_if_fail (klass->fetch_device_info_async != NULL);
+  g_return_if_fail (klass->refresh_device_info_async != NULL);
 
-  klass->fetch_device_info_async (self, cancellable, callback, user_data);
+  klass->refresh_device_info_async (self, cancellable, callback, user_data);
 }
 
-OgDeviceInfo *
-og_base_device_fetch_device_info_finish (OgBaseDevice *self,
+gboolean
+og_base_device_refresh_device_info_finish (OgBaseDevice *self,
     GAsyncResult *result,
     GError **error)
 {
   OgBaseDeviceClass *klass;
 
-  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
-  g_return_val_if_fail (G_IS_ASYNC_RESULT (result), NULL);
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), FALSE);
+  g_return_val_if_fail (G_IS_ASYNC_RESULT (result), FALSE);
 
   klass = OG_BASE_DEVICE_GET_CLASS (self);
-  g_return_val_if_fail (klass->fetch_device_info_finish != NULL, NULL);
+  g_return_val_if_fail (klass->refresh_device_info_finish != NULL, FALSE);
 
-  return klass->fetch_device_info_finish (self, result, error);
+  return klass->refresh_device_info_finish (self, result, error);
+}
+
+const gchar *
+og_base_device_get_serial_number (OgBaseDevice *self)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_val_if_fail (klass->get_serial_number != NULL, NULL);
+
+  return klass->get_serial_number (self);
+}
+
+GDateTime *
+og_base_device_get_clock (OgBaseDevice *self,
+    GDateTime **system_clock)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_val_if_fail (klass->get_clock != NULL, NULL);
+
+  return klass->get_clock (self, system_clock);
+}
+
+OgRecord **
+og_base_device_get_records (OgBaseDevice *self)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_val_if_fail (klass->get_records != NULL, NULL);
+
+  return klass->get_records (self);
 }
