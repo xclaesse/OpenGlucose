@@ -50,6 +50,7 @@ src/openglucose-resources.h: src/openglucose.gresource.xml $(shell $(GLIB_COMPIL
 
 openglucose_SOURCES = \
 	src/base-device.c src/base-device.h \
+	src/dummy-device.c src/dummy-device.h \
 	src/insulinx.c src/insulinx.h \
 	src/main.c \
 	src/main-window.c src/main-window.h \
@@ -59,7 +60,7 @@ nodist_openglucose_SOURCES = \
 	src/openglucose-resources.c \
 	src/openglucose-resources.h \
 	$(NULL)
-openglucose_LDADD = $(OPENGLUCOSE_LIBS)
+openglucose_LDADD = $(OPENGLUCOSE_LIBS) -lm
 
 BUILT_SOURCES = \
 	$(nodist_openglucose_SOURCES) \

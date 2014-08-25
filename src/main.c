@@ -4,6 +4,7 @@
 #include <gusb.h>
 
 #include "base-device.h"
+#include "dummy-device.h"
 #include "insulinx.h"
 #include "main-window.h"
 
@@ -111,6 +112,15 @@ startup (GApplication *app)
       G_CALLBACK (add_device), self);
   g_signal_connect_swapped (self->list, "device-removed",
       G_CALLBACK (remove_device), self);
+
+  if (g_getenv ("OPENGLUCOSE_DUMMY_DEVICE") != NULL)
+    {
+      OgBaseDevice *base;
+
+      base = og_dummy_device_new ();
+      og_main_window_add_device ((OgMainWindow *) self->window, base);
+      g_object_unref (base);
+    }
 }
 
 static void
