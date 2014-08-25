@@ -52,7 +52,7 @@ struct _OgBaseDeviceClass {
   const gchar *(*get_serial_number) (OgBaseDevice *self);
   GDateTime *(*get_clock) (OgBaseDevice *self,
       GDateTime **system_clock);
-  OgRecord **(*get_records) (OgBaseDevice *self);
+  const OgRecord * const *(*get_records) (OgBaseDevice *self);
 };
 
 typedef enum
@@ -85,7 +85,7 @@ gboolean og_base_device_refresh_device_info_finish (OgBaseDevice *self,
 const gchar *og_base_device_get_serial_number (OgBaseDevice *self);
 GDateTime *og_base_device_get_clock (OgBaseDevice *self,
     GDateTime **system_clock);
-OgRecord **og_base_device_get_records (OgBaseDevice *self);
+const OgRecord * const *og_base_device_get_records (OgBaseDevice *self);
 
 G_END_DECLS
 

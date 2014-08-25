@@ -168,7 +168,7 @@ og_base_device_get_clock (OgBaseDevice *self,
   return klass->get_clock (self, system_clock);
 }
 
-OgRecord **
+const OgRecord * const *
 og_base_device_get_records (OgBaseDevice *self)
 {
   OgBaseDeviceClass *klass;

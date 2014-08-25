@@ -564,7 +564,7 @@ get_clock (OgBaseDevice *base,
   return self->priv->device_clock;
 }
 
-static OgRecord **
+static const OgRecord * const *
 get_records (OgBaseDevice *base)
 {
   OgInsulinx *self;
@@ -575,7 +575,7 @@ get_records (OgBaseDevice *base)
   if (self->priv->records == NULL)
     return NULL;
 
-  return (OgRecord **) self->priv->records->pdata;
+  return (const OgRecord * const *) self->priv->records->pdata;
 }
 
 static void

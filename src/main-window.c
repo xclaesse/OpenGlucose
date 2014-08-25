@@ -85,7 +85,7 @@ update_device_js (OgMainWindow *self,
     OgBaseDevice *device)
 {
   GString *string;
-  OgRecord **records;
+  const OgRecord * const *records;
   guint i;
 
   string = g_string_new ("og.updateDevice({");
