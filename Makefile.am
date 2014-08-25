@@ -2,6 +2,17 @@ ACLOCAL_AMFLAGS = -I m4
 
 DISTCHECK_CONFIGURE_FLAGS = --disable-debug
 
+jqplotdir = $(datadir)/openglucose/jqplot
+jqplot_DATA = \
+	jqplot/*.min.css \
+	jqplot/*.min.js \
+	$(NULL)
+
+jqplotpluginsdir = $(datadir)/openglucose/jqplot/plugins
+jqplotplugins_DATA = \
+	jqplot/plugins/*.min.js \
+	$(NULL)
+
 EXTRA_DIST = \
 	autogen.sh \
 	data/60-insulinx.rules \
@@ -9,6 +20,8 @@ EXTRA_DIST = \
 	m4/linker.m4 \
 	m4/tp-compiler-flag.m4 \
 	m4/tp-compiler-warnings.m4 \
+	$(jqplot_DATA) \
+	$(jqplotplugins_DATA) \
 	$(NULL)
 
 AM_CPPFLAGS = \
