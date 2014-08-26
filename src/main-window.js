@@ -1,6 +1,6 @@
 function OgMainWindow()
 {
-  var plots = {};
+  var devices = {};
 
   var updateNoDeviceMessage = function() {
     if ($(".device-container").length == 0)
@@ -61,7 +61,13 @@ function OgMainWindow()
     for (var i = 0; i < 12; i++)
       averages.push({sum: 0, nVals: 0});
 
+    var now = new Date();
+
     for (var i = 0; i < device.data.length; i++) {
+      var diff = now - device.data[i][0];
+      if (device.timeRange >= 0 && diff > device.timeRange)
+        continue;
+
       var p = Math.trunc(device.data[i][0].getHours() / 2);
       averages[p].sum += device.data[i][1];
       averages[p].nVals++;
@@ -84,12 +90,17 @@ function OgMainWindow()
   };
 
   this.updateDevice = function(device) {
-    this.removeDevice(device.id);
+    if (device.id in devices) {
+      $("#" + device.id).empty();
+    } else {
+      $("body").append("<div id='" + device.id + "' class='device-container'/>");
+      updateNoDeviceMessage();
+    }
 
-    $("body").append("<div id='" + device.id + "'/>");
-    $("#" + device.id).addClass("device-container");
+    removeDeviceInternal(device.id);
+    devices[device.id] = device;
+
     $("#" + device.id).append("<h1>" + device.name + "</h1>");
-    updateNoDeviceMessage();
 
     if (device.refreshing) {
       $("#" + device.id).append("<p>Fetching device information</p>");
@@ -101,11 +112,27 @@ function OgMainWindow()
       return;
     }
 
-    $("#" + device.id).append("<p>Serial Number: " + device.sn + "</p>");
-    $("#" + device.id).append("<p>Number of results: " + device.data.length + "</p>");
-    $("#" + device.id).append("<dir id='chart-" + device.id + "'/>");
+    $("#" + device.id).append(
+        "<table class='device-info-container'>" +
+        "  <tr><td>Serial Number:</td><td>" + device.sn + "</td></tr>" +
+        "  <tr><td>Number of results:</td><td>" + device.data.length + "</td></tr>" +
+        "</table>");
+
+    var selectors =
+        "<table class='chart-period-selector'>" +
+        "  <tr>" +
+        "    <td><input type='button' onclick='og.changeTimeRange(\"" + device.id + "\", 1*24*60*60*1000)' value='1D'></input></td>" +
+        "    <td><input type='button' onclick='og.changeTimeRange(\"" + device.id + "\", 7*24*60*60*1000)' value='1W'></input></td>" +
+        "    <td><input type='button' onclick='og.changeTimeRange(\"" + device.id + "\", 30*24*60*60*1000)' value='1M'></input></td>" +
+        "    <td><input type='button' onclick='og.changeTimeRange(\"" + device.id + "\", 365*24*60*60*1000)' value='1Y'></input></td>" +
+        "    <td><input type='button' onclick='og.changeTimeRange(\"" + device.id + "\", -1)' value='All'></input></td>" +
+        "  </tr>" +
+        "</table>";
+    $("#" + device.id).append(selectors);
+
+    $("#" + device.id).append("<div id='chart-" + device.id + "'/>");
     var series = dailyAverageSeries(device);
-    plots[device.id] = $.jqplot('chart-' + device.id, series, {
+    device.plot = $.jqplot('chart-' + device.id, series, {
       title: 'Daily average',
       series: [{
         renderer: $.jqplot.LineRenderer,
@@ -141,13 +168,28 @@ function OgMainWindow()
     });
   };
 
+  var removeDeviceInternal = function(id) {
+    var device = devices[id];
+    if (device && device.plot)
+      device.plot.destroy();
+    delete devices[id];
+  }
+
   this.removeDevice = function(id) {
     $("#" + id).remove();
-    if (id in plots) {
-      plots[id].destroy();
-      delete plots[id];
-    }
+    removeDeviceInternal(id);
     updateNoDeviceMessage();
+  };
+
+  this.changeTimeRange = function(id, range) {
+    var device = devices[id];
+    device.timeRange = range;
+    if (device.plot) {
+      device.plot.replot({
+        resetAxis: true,
+        data: dailyAverageSeries(device)
+      });
+    }
   };
 
   this.documentReady = function() {
@@ -156,8 +198,11 @@ function OgMainWindow()
   };
 
   this.resize = function() {
-    for (var key in plots)
-      plots[key].replot({resetAxis: true});
+    for (var key in devices) {
+      var device = devices[key];
+      if (device.plot)
+        device.plot.replot({resetAxis: true});
+    }
   };
 }
 
