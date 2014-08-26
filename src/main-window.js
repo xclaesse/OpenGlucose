@@ -53,6 +53,36 @@ function OgMainWindow()
     };
   };
 
+  var dailyAverageSeries = function(device) {
+    var serie1 = [];
+    var serie2 = [];
+
+    var averages = [];
+    for (var i = 0; i < 12; i++)
+      averages.push({sum: 0, nVals: 0});
+
+    for (var i = 0; i < device.data.length; i++) {
+      var p = Math.trunc(device.data[i][0].getHours() / 2);
+      averages[p].sum += device.data[i][1];
+      averages[p].nVals++;
+
+      var date = new Date(0, 0, 0,
+          device.data[i][0].getHours(),
+          device.data[i][0].getMinutes(),
+          0, 0);
+      serie1.push([date, device.data[i][1]]);
+    }
+
+    for (var i = 0; i < 12; i++) {
+      if (averages[i].nVals > 0) {
+        var date = new Date(0, 0, 0, i * 2 + 1, 0, 0, 0);
+        serie2.push([date, averages[i].sum / averages[i].nVals]);
+      }
+    }
+
+    return [serie1, serie2];
+  };
+
   this.updateDevice = function(device) {
     this.removeDevice(device.id);
 
@@ -72,12 +102,18 @@ function OgMainWindow()
     }
 
     $("#" + device.id).append("<p>Serial Number: " + device.sn + "</p>");
+    $("#" + device.id).append("<p>Number of results: " + device.data.length + "</p>");
     $("#" + device.id).append("<dir id='chart-" + device.id + "'/>");
-    $("#chart-" + device.id).addClass("chart");
-
-    plots[device.id] = $.jqplot('chart-' + device.id, [device.data], {
-      title: 'Glycemias',
+    var series = dailyAverageSeries(device);
+    plots[device.id] = $.jqplot('chart-' + device.id, series, {
+      title: 'Daily average',
       series: [{
+        renderer: $.jqplot.LineRenderer,
+        showLine: false,
+        pointLabels: {show: false},
+        markerOptions: {size: 5}
+      },
+      {
         renderer: $.jqplot.LineRenderer,
         lineWidth: 2,
         pointLabels: {show: false},
@@ -89,7 +125,10 @@ function OgMainWindow()
       axes: {
         xaxis: {
           renderer: $.jqplot.DateAxisRenderer,
-          tickOptions: {angle: 30},
+          tickOptions: {
+            angle: 30,
+            formatString: '%H:%M',
+          },
           autoscale: true,
         },
         yaxis: {
