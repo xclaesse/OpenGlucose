@@ -1,0 +1,102 @@
+[889748 ms] UsbSnoop - FilterDispatchAny(b89f0fd2) : IRP_MJ_INTERNAL_DEVICE_CONTROL
+[889748 ms] UsbSnoop - FdoHookDispatchInternalIoctl(b89f11ea) : fdo=8ab52660, Irp=872d01e0, IRQL=0
+[889748 ms]  >>>  URB 1321 going down  >>> 
+-- URB_FUNCTION_CLASS_INTERFACE:
+  TransferFlags          = 00000000 (USBD_TRANSFER_DIRECTION_OUT, ~USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = bafe03f2
+  TransferBufferMDL    = 00000000
+    00000000: 60 0f 24 64 61 74 65 2c 38 2c 32 37 2c 31 34 0d
+    00000010: 0a cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd
+    00000020: cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd
+    00000030: cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd
+  UrbLink                 = 00000000
+  RequestTypeReservedBits = 00000022
+  Request                 = 00000009
+  Value                   = 00000200
+  Index                   = 00000000
+[889749 ms] UsbSnoop - MyInternalIOCTLCompletion(b89f1126) : fido=872ce4d8, Irp=872d01e0, Context=873585c0, IRQL=2
+[889749 ms]  <<<  URB 1321 coming back  <<< 
+-- URB_FUNCTION_CONTROL_TRANSFER:
+  PipeHandle           = 88d100b8
+  TransferFlags        = 0000000a (USBD_TRANSFER_DIRECTION_OUT, USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = bafe03f2
+  TransferBufferMDL    = 873134a8
+  UrbLink              = 00000000
+  SetupPacket          =
+    00000000: 21 09 00 02 00 00 40 00
+[889783 ms] UsbSnoop - MyInternalIOCTLCompletion(b89f1126) : fido=872ce4d8, Irp=88d12970, Context=87119230, IRQL=2
+[889783 ms]  <<<  URB 1319 coming back  <<< 
+-- URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER:
+  PipeHandle           = 870cdfdc [endpoint 0x00000081]
+  TransferFlags        = 00000003 (USBD_TRANSFER_DIRECTION_IN, USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = 870a0720
+  TransferBufferMDL    = 8746b9e0
+    00000000: 60 17 43 4b 53 4d 3a 30 30 30 30 30 30 30 30 0d
+    00000010: 0a 43 4d 44 20 4f 4b 0d 0a 0a 43 4d 44 20 4f 4b
+    00000020: 0d 0a 30 2c 31 33 39 2c 30 2c 30 0d 0a 46 20 46
+    00000030: 46 0d 0a 00 00 00 00 00 00 00 00 00 00 00 00 00
+  UrbLink              = 00000000
+[889783 ms] UsbSnoop - FilterDispatchAny(b89f0fd2) : IRP_MJ_INTERNAL_DEVICE_CONTROL
+[889783 ms] UsbSnoop - FdoHookDispatchInternalIoctl(b89f11ea) : fdo=8ab52660, Irp=88d12970, IRQL=2
+[889783 ms]  >>>  URB 1322 going down  >>> 
+-- URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER:
+  PipeHandle           = 870cdfdc [endpoint 0x00000081]
+  TransferFlags        = 00000003 (USBD_TRANSFER_DIRECTION_IN, USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = 870a0720
+  TransferBufferMDL    = 00000000
+  UrbLink              = 00000000
+[889783 ms] UsbSnoop - FilterDispatchAny(b89f0fd2) : IRP_MJ_INTERNAL_DEVICE_CONTROL
+[889783 ms] UsbSnoop - FdoHookDispatchInternalIoctl(b89f11ea) : fdo=8ab52660, Irp=86f66280, IRQL=0
+[889783 ms]  >>>  URB 1323 going down  >>> 
+-- URB_FUNCTION_CLASS_INTERFACE:
+  TransferFlags          = 00000000 (USBD_TRANSFER_DIRECTION_OUT, ~USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = baf733f2
+  TransferBufferMDL    = 00000000
+    00000000: 60 0d 24 74 69 6d 65 2c 31 33 2c 34 30 0d 0a cd
+    00000010: cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd
+    00000020: cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd
+    00000030: cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd cd
+  UrbLink                 = 00000000
+  RequestTypeReservedBits = 00000022
+  Request                 = 00000009
+  Value                   = 00000200
+  Index                   = 00000000
+[889784 ms] UsbSnoop - MyInternalIOCTLCompletion(b89f1126) : fido=872ce4d8, Irp=86f66280, Context=873585c0, IRQL=2
+[889784 ms]  <<<  URB 1323 coming back  <<< 
+-- URB_FUNCTION_CONTROL_TRANSFER:
+  PipeHandle           = 88d100b8
+  TransferFlags        = 0000000a (USBD_TRANSFER_DIRECTION_OUT, USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = baf733f2
+  TransferBufferMDL    = 86ffddb8
+  UrbLink              = 00000000
+  SetupPacket          =
+    00000000: 21 09 00 02 00 00 40 00
+[889814 ms] UsbSnoop - MyInternalIOCTLCompletion(b89f1126) : fido=872ce4d8, Irp=88d30008, Context=8745fc50, IRQL=2
+[889814 ms]  <<<  URB 1320 coming back  <<< 
+-- URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER:
+  PipeHandle           = 870cdfdc [endpoint 0x00000081]
+  TransferFlags        = 00000003 (USBD_TRANSFER_DIRECTION_IN, USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = 86f807e8
+  TransferBufferMDL    = 86f8ad40
+    00000000: 60 17 43 4b 53 4d 3a 30 30 30 30 30 30 30 30 0d
+    00000010: 0a 43 4d 44 20 4f 4b 0d 0a 4d 44 20 4f 4b 0d 0a
+    00000020: 31 2c 30 2c 31 31 33 2c 30 2c 30 0d 0a 46 20 46
+    00000030: 46 0d 0a 00 00 00 00 00 00 00 00 00 00 00 00 00
+  UrbLink              = 00000000
+[889814 ms] UsbSnoop - FilterDispatchAny(b89f0fd2) : IRP_MJ_INTERNAL_DEVICE_CONTROL
+[889814 ms] UsbSnoop - FdoHookDispatchInternalIoctl(b89f11ea) : fdo=8ab52660, Irp=88d30008, IRQL=2
+[889814 ms]  >>>  URB 1324 going down  >>> 
+-- URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER:
+  PipeHandle           = 870cdfdc [endpoint 0x00000081]
+  TransferFlags        = 00000003 (USBD_TRANSFER_DIRECTION_IN, USBD_SHORT_TRANSFER_OK)
+  TransferBufferLength = 00000040
+  TransferBuffer       = 86f807e8
+  TransferBufferMDL    = 00000000
+  UrbLink              = 00000000
