@@ -102,12 +102,12 @@ function OgMainWindow()
 
     $("#" + device.id).append("<h1>" + device.name + "</h1>");
 
-    if (device.refreshing) {
+    if (device.busy) {
       $("#" + device.id).append("<p>Fetching device information</p>");
       return;
     }
 
-    if (device.failed) {
+    if (device.error) {
       $("#" + device.id).append("<p>Failed to fetch device information</p>");
       return;
     }

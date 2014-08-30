@@ -101,11 +101,11 @@ update_device_js (OgMainWindow *self,
     {
       case OG_BASE_DEVICE_STATUS_NONE:
         g_assert_not_reached ();
-      case OG_BASE_DEVICE_STATUS_REFRESHING:
-        g_string_append (string, "refreshing:true,");
+      case OG_BASE_DEVICE_STATUS_BUZY:
+        g_string_append (string, "busy:true,");
         goto out;
-      case OG_BASE_DEVICE_STATUS_FAILED:
-        g_string_append (string, "failed:true,");
+      case OG_BASE_DEVICE_STATUS_ERROR:
+        g_string_append (string, "error:true,");
         goto out;
       case OG_BASE_DEVICE_STATUS_READY:
         /* continue */
@@ -240,7 +240,7 @@ og_main_window_new (GtkApplication *application)
 }
 
 static void
-refresh_device_info_cb (GObject *source,
+prepare_cb (GObject *source,
     GAsyncResult *result,
     gpointer user_data)
 {
@@ -248,9 +248,9 @@ refresh_device_info_cb (GObject *source,
   OgBaseDevice *device = (OgBaseDevice *) source;
   GError *error = NULL;
 
-  if (!og_base_device_refresh_device_info_finish (device, result, &error))
+  if (!og_base_device_prepare_finish (device, result, &error))
     {
-      g_warning ("Error refreshing device: %s", error->message);
+      g_warning ("Error preparing device: %s", error->message);
       g_clear_error (&error);
       return;
     }
@@ -270,8 +270,8 @@ og_main_window_add_device (OgMainWindow *self,
   self->priv->devices = g_list_prepend (self->priv->devices,
       g_object_ref (device));
 
-  og_base_device_refresh_device_info_async (device, NULL,
-      refresh_device_info_cb, self);
+  og_base_device_prepare_async (device, NULL,
+      prepare_cb, self);
 
   if (self->priv->loaded)
     update_device_js (self, device);

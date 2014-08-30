@@ -6,19 +6,105 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+/* Abbott FreeStyle InsuLinx reverse-engineered protocol.
+ *
+ * This is based on USB logs of 'auto-assist' Windows application, captured
+ * using USBSnoop (http://www.pcausa.com/Utilities/UsbSnoop/).
+ * See log files and parser.py openglucose/data/insulinx/.
+ *
+ * Buffers of 64 bytes are transferred between the host and the device. The host
+ * sends a request to the device and pull the reply. The first byte of the
+ * buffer is (probably) the type of the message, the 2nd byte is the length of
+ * the message, and rest is ASCII message. Bytes after lenght+2 are meaningless.
+ *
+ * There is first an init sequence, it is still a bit obscure but it goes like
+ * this:
+ *
+ * 1) No idea if it has particular meaning
+ * Request: code=0x4,  msg=""
+ * Reply:   code=0x34, msg="0xc"
+ *
+ * 2) That's the serial number followed by \0
+ * Request: code=0x5,  msg=""
+ * Reply:   code=0x6,  msg="JAGT241-U62420x0"
+ *
+ * 3) That's device' software version followed by \0
+ * Request: code=0x15, msg=""
+ * Reply:   code=0x35, msg="1.400x0"
+ *
+ * 4) No idea if it has particular meaning
+ * Request: code=0x1,  msg=""
+ * Reply:   code=0x71, msg="0x1"
+ *
+ * After that all kind of commands can be sent in the form:
+ *
+ * Request: code=0x60, msg="$foo?\r\n"
+ * Reply: code=0x60, msg="bar\r\nCKSM:0000014C\r\nCMD OK\r\n"
+ *
+ * The reply can be on multiple buffers, thus it need to pull replies until the
+ * "CKSM:XXXXXXXX\r\nCMD OK\r\n" is received.
+ *
+ * CKSM is the checksum of the reply, it is the simple sum of ASCII values in
+ * hexadecimal. In the above example it would be:
+ * 'b' + 'a' + 'r' + '\r' + '\n' = 0x14c
+ *
+ * Every 3 requests, the reply will start first with a special buffer starting
+ * with 0x22 0x01 0x03. I don't know what it means, they are ignored.
+ *
+ * To change the value of "foo":
+ *
+ * Request: code=0x60, msg="$foo,newvalue\r\n"
+ * Reply: code=0x60, msg="CKSM:00000000\r\nCMD OK\r\n"
+ *
+ * Here are all the commands issued by auto-assist when plugging the device:
+ *
+ *   $serlnum?, $swver?, $date?, $time?, $ptname?, $ptid?, $getrmndrst,0,
+ *   $getrmndr,0, $rmdstrorder?, $actthm?, $wktrend?, $gunits?, $clktyp?,
+ *   $alllang?, $lang?, $inslock?, $actinscal?, $iobstatus?, $foodunits?,
+ *   $svgsdef?, $corsetup?, $insdose?, $inslog?, $inscalsetup?, $carbratio?,
+ *   $svgsratio?, $mlcalget,3, $cttype?, $bgdrop?, $bgtrgt?, $bgtgrng?,
+ *   $ntsound?, $btsound?, $custthm?, $taglang?, $tagsenbl?, $tagorder?,
+ *   $result?, $gettags,2,2, $frststrt?
+ */
+
 G_DEFINE_TYPE (OgInsulinx, og_insulinx, OG_TYPE_BASE_DEVICE)
 
 #define BUFFER_SIZE 64
+#define DEBUG g_debug
+#define DEBUG_MSG debug_msg
+
+typedef void (*ParserFunc) (OgInsulinx *self,
+      guint8 code,
+      const gchar *msg);
+
+typedef struct
+{
+  guint8 code;
+  gchar *cmd;
+  ParserFunc parser;
+} Request;
 
 struct _OgInsulinxPrivate
 {
+  OgBaseDeviceStatus status;
   GUsbDevice *usb_device;
 
-  GQueue refresh_tasks;
-  gint state;
-  guint8 buffer[BUFFER_SIZE];
+  GCancellable *cancellable;
+
+  /* +1 so we can always add a \0 at the end for safety */
+  guint8 send_buffer[BUFFER_SIZE + 1];
+  guint8 receive_buffer[BUFFER_SIZE + 1];
+  GString *received;
+  guint cksm;
+  gboolean cksm_received;
+
+  /* GQueue<owned Request> */
+  GQueue request_queue;
+  Request *req;
+  GTask *task;
 
   gchar *serial_number;
+  gchar *sw_version;
   GDateTime *device_clock;
   GDateTime *system_clock;
   GPtrArray *records;
@@ -32,61 +118,360 @@ enum
   PROP_USB_DEVICE,
 };
 
-typedef enum
+static void
+ptr_array_add_null_term (GPtrArray *array,
+    gpointer ptr)
 {
-  OG_INSULINX_ERROR_CMD_FAILED,
-  OG_INSULINX_ERROR_PARSER,
-  OG_INSULINX_ERROR_FETCH_ONGOING,
-} OgInsulinxError;
-
-#define OG_INSULINX_ERROR og_insulinx_error_quark()
-GQuark og_insulinx_error_quark (void);
-G_DEFINE_QUARK (og-insulinx-error-quark, og_insulinx_error)
-
-/* Known commands:
- * $time?, $date?, $serlnum?, $ptname?, $ptid?, $lang?, $clktyp?, $taglang?,
- * $custthm?, $tagorder?, $ntsound?, $wktrend?, $foodunits?, $carbratio?,
- * $svgsdef?, $svgsratio?, $actinscal?, $insdose?, $gunits?, $cttype?, $bgdrop?,
- * $bgtrgt?, $bgtgrng?, $inslog?, $corsetup?, $iobstatus?, $btsound?, $hwver?,
- * $swver?, $frststrt?, $alllang?, $ioblog?, $actthm?, $tagsenbl?, $event?,
- * $inslock?
- */
-#define DECLARE_PARSER(func) \
-  static gboolean parse_##func (OgInsulinx *self, \
-      const gchar *msg, \
-      GError **error)
-DECLARE_PARSER (serial_number);
-DECLARE_PARSER (result);
-DECLARE_PARSER (date);
-DECLARE_PARSER (time);
-#undef DECLARE_PARSER
-
-typedef struct
-{
-  guint8 code;
-  const gchar *cmd;
-  gboolean (*parse) (OgInsulinx *self,
-      const gchar *msg,
-      GError **error);
-} Request;
-
-static Request requests[] = {
-  { 0x04, "", NULL },
-  { 0x05, "", parse_serial_number },
-  { 0x15, "", NULL },
-  { 0x01, "", NULL },
-  { 0x60, "$result?\r\n", parse_result },
-  { 0x60, "$date?\r\n", parse_date },
-  { 0x60, "$time?\r\n", parse_time },
-};
+  /* Remove ending NULL first */
+  g_ptr_array_remove_index_fast (array, array->len - 1);
+  g_ptr_array_add (array, ptr);
+  g_ptr_array_add (array, NULL);
+}
 
 static void
-clear_device_info (OgInsulinx *self)
+debug_msg (const gchar *way,
+    guint8 code,
+    const gchar *msg)
 {
-  g_clear_pointer (&self->priv->serial_number, g_free);
-  g_clear_pointer (&self->priv->device_clock, g_date_time_unref);
-  g_clear_pointer (&self->priv->system_clock, g_date_time_unref);
-  g_clear_pointer (&self->priv->records, g_ptr_array_unref);
+  GString *string;
+  guint i;
+
+  string = g_string_sized_new (strlen (msg));
+  for (i = 0; msg[i] != '\0'; i++)
+    {
+      if (g_ascii_isprint (msg[i]))
+        g_string_append_c (string, msg[i]);
+      else if (msg[i] == '\r')
+        g_string_append (string, "\\r");
+      else if (msg[i] == '\n')
+        g_string_append (string, "\\n");
+      else
+        g_string_append_printf (string, "0x%02x", msg[i]);
+    }
+
+  DEBUG ("%s: code=0x%02x, msg=\"%s\"", way, code, string->str);
+
+  g_string_free (string, TRUE);
+}
+
+static void
+change_status (OgInsulinx *self,
+    OgBaseDeviceStatus status)
+{
+  if (self->priv->status == status)
+    return;
+
+  self->priv->status = status;
+  g_object_notify ((GObject *) self, "status");
+}
+
+static void
+report_error (OgInsulinx *self,
+    GError *error)
+{
+  /* Ignore CANCELLED error, it is either voluntary or consequence of an earlier
+   * error. */
+  if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+      DEBUG ("Error: %s", error->message);
+      change_status (self, OG_BASE_DEVICE_STATUS_ERROR);
+      g_cancellable_cancel (self->priv->cancellable);
+    }
+
+  if (self->priv->task != NULL)
+    {
+      g_task_return_error (self->priv->task, error);
+      g_clear_object (&self->priv->task);
+    }
+  else
+    {
+      g_error_free (error);
+    }
+}
+
+static void
+control_transfer_cb (GObject *source,
+    GAsyncResult *result,
+    gpointer user_data)
+{
+  OgInsulinx *self = user_data;
+  GError *error = NULL;
+
+  if (g_usb_device_control_transfer_finish (self->priv->usb_device, result,
+          &error) < 0)
+    {
+      report_error (self, error);
+      goto out;
+    }
+
+out:
+  g_object_unref (self);
+}
+
+static void
+request_queue_continue (OgInsulinx *self)
+{
+  gsize len;
+
+  if (self->priv->req != NULL)
+    return;
+
+  self->priv->req = g_queue_pop_head (&self->priv->request_queue);
+  if (self->priv->req == NULL)
+    {
+      GTask *task = self->priv->task;
+
+      self->priv->task = NULL;
+      change_status (self, OG_BASE_DEVICE_STATUS_READY);
+      g_task_return_boolean (task, TRUE);
+      g_object_unref (task);
+      return;
+    }
+
+  change_status (self, OG_BASE_DEVICE_STATUS_BUZY);
+
+  len = strlen (self->priv->req->cmd);
+  g_assert (len <= BUFFER_SIZE - 2);
+
+  self->priv->send_buffer[0] = self->priv->req->code;
+  self->priv->send_buffer[1] = len;
+  g_memmove (self->priv->send_buffer + 2, self->priv->req->cmd, len);
+
+  /* Send the request */
+  DEBUG_MSG ("Sent", self->priv->req->code, self->priv->req->cmd);
+  g_usb_device_control_transfer_async (self->priv->usb_device,
+      G_USB_DEVICE_DIRECTION_HOST_TO_DEVICE,
+      G_USB_DEVICE_REQUEST_TYPE_CLASS,
+      G_USB_DEVICE_RECIPIENT_INTERFACE,
+      0x09,
+      0x0200,
+      0,
+      self->priv->send_buffer, BUFFER_SIZE,
+      0,
+      self->priv->cancellable,
+      control_transfer_cb,
+      g_object_ref (self));
+}
+
+static void
+queue_request (OgInsulinx *self,
+    guint8 code,
+    const gchar *cmd,
+    ParserFunc parser)
+{
+  Request *req;
+
+  req = g_slice_new0 (Request);
+  req->code = code;
+  req->cmd = g_strdup (cmd);
+  req->parser = parser;
+
+  g_queue_push_tail (&self->priv->request_queue, req);
+  request_queue_continue (self);
+}
+
+static void
+request_free (Request *req)
+{
+  g_free (req->cmd);
+  g_slice_free (Request, req);
+}
+
+static void
+request_done (OgInsulinx *self)
+{
+  g_clear_pointer (&self->priv->req, request_free);
+  self->priv->cksm_received = FALSE;
+  self->priv->cksm = 0;
+  request_queue_continue (self);
+}
+
+static gboolean
+find_line_break (GString *string,
+    guint *pos)
+{
+  gchar *p;
+
+  p = g_strstr_len (string->str, string->len, "\r\n");
+  if (p == NULL)
+    return FALSE;
+
+  *pos = p - string->str;
+  return TRUE;
+}
+
+static guint
+checksum (const gchar *str)
+{
+  guint ret = 0;
+  guint i;
+
+  for (i = 0; str[i] != '\0'; i++)
+    ret += str[i];
+
+  return ret;
+}
+
+static void
+parser_common (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
+{
+  guint pos;
+
+  g_assert (self->priv->req != NULL);
+  g_assert (self->priv->req->parser != NULL);
+
+  /* If it is one of the initialization requests, pass it to the specialized
+   * parser directly. */
+  if (self->priv->req->code != 0x60)
+    {
+      self->priv->req->parser (self, code, msg);
+      return;
+    }
+
+  /* FIXME: Not sure what they are, ignore */
+  if (code == 0x22)
+    {
+      if (msg[0] != 0x3 || msg[1] != '\0')
+        {
+          report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+              OG_BASE_DEVICE_ERROR_PARSER,
+              "Received 0x22 buffer with unusual msg"));
+        }
+      return;
+    }
+
+  if (code != 0x60)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Made a 0x60 request and received something else"));
+      return;
+    }
+
+  /* Accumulate the received msg with what's left unparsed of the previous msg.
+   * It can happen that a msg is split into multiple buffers. */
+  g_string_append (self->priv->received, msg);
+
+  /* Let's parse what we received line by line */
+  while (find_line_break (self->priv->received, &pos))
+    {
+      gchar *line;
+      guint cksm;
+
+      line = self->priv->received->str;
+      line[pos] = '\0';
+
+      if (sscanf (line, "CKSM:%8x", &cksm) == 1)
+        {
+          /* We received the checksum */
+          if (cksm != self->priv->cksm)
+            {
+              report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+                  OG_BASE_DEVICE_ERROR_PARSER,
+                  "Checksum mismatch: expected %x, calculated %x",
+                  cksm, self->priv->cksm));
+              return;
+            }
+          self->priv->cksm_received = TRUE;
+        }
+      else if (self->priv->cksm_received)
+        {
+          /* Previous line was the checksum, the only valid line afterward is
+           * "CMD OK", we can start the next request after that. */
+          if (!g_str_equal (line, "CMD OK"))
+            {
+              report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+                  OG_BASE_DEVICE_ERROR_PARSER,
+                  "Checksum not followed by \"CMD OK\""));
+              return;
+            }
+
+          request_done (self);
+        }
+      else
+        {
+          /* Give that line to the specialized parser */
+          self->priv->req->parser (self, code, line);
+          if (self->priv->status == OG_BASE_DEVICE_STATUS_ERROR)
+            return;
+
+          /* Incrementaly calculate the checksum, including the line break
+           * that we stripped. */
+          self->priv->cksm += checksum (line) + checksum ("\r\n");
+        }
+
+      g_string_erase (self->priv->received, 0, pos + 2);
+    }
+}
+
+static void start_interrupt_transfer (OgInsulinx *self);
+
+static void
+interrupt_transfer_cb (GObject *source,
+    GAsyncResult *result,
+    gpointer user_data)
+{
+  OgInsulinx *self = user_data;
+  guint8 code;
+  guint8 msg_len;
+  gchar *msg;
+  GError *error = NULL;
+
+  if (g_usb_device_interrupt_transfer_finish (self->priv->usb_device, result,
+          &error) < 0)
+    {
+      report_error (self, error);
+      goto out;
+    }
+
+  if (self->priv->req == NULL)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_UNEXPECTED,
+          "Received a buffer while nothing was requested"));
+      goto out;
+    }
+
+  /* 1st byte is the type of the message */
+  code = self->priv->receive_buffer[0];
+
+  /* 2nd byte is the length of the message */
+  msg_len = self->priv->receive_buffer[1];
+  if (msg_len > BUFFER_SIZE - 2)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Message length bigger than buffer size"));
+      goto out;
+    }
+
+  /* Extract the message and ensure it is 0-terminated */
+  msg = (gchar *) self->priv->receive_buffer + 2;
+  msg[msg_len] = '\0';
+
+  DEBUG_MSG ("Received", code, msg);
+  parser_common (self, self->priv->receive_buffer[0], msg);
+
+  /* continue pulling */
+  if (self->priv->status != OG_BASE_DEVICE_STATUS_ERROR)
+    start_interrupt_transfer (self);
+
+out:
+  g_object_unref (self);
+}
+
+static void
+start_interrupt_transfer (OgInsulinx *self)
+{
+  g_usb_device_interrupt_transfer_async (self->priv->usb_device,
+      0x81,
+      self->priv->receive_buffer, BUFFER_SIZE,
+      0,
+      self->priv->cancellable,
+      interrupt_transfer_cb,
+      g_object_ref (self));
 }
 
 static void
@@ -94,8 +479,14 @@ og_insulinx_init (OgInsulinx *self)
 {
   self->priv = G_TYPE_INSTANCE_GET_PRIVATE (self,
       OG_TYPE_INSULINX, OgInsulinxPrivate);
-  self->priv->state = -1;
-  g_queue_init (&self->priv->refresh_tasks);
+
+  g_queue_init (&self->priv->request_queue);
+  self->priv->cancellable = g_cancellable_new ();
+  self->priv->received = g_string_new (NULL);
+
+  self->priv->records = g_ptr_array_new_with_free_func (
+      (GDestroyNotify) og_record_free);
+  g_ptr_array_add (self->priv->records, NULL);
 }
 
 static void
@@ -138,97 +529,154 @@ set_property (GObject *object,
 }
 
 static void
-constructed (GObject *object)
+finalize (GObject *object)
 {
   OgInsulinx *self = (OgInsulinx *) object;
-  GError *error = NULL;
 
-  G_OBJECT_CLASS (og_insulinx_parent_class)->constructed (object);
+  g_object_unref (self->priv->usb_device);
+  g_object_unref (self->priv->cancellable);
+  g_string_free (self->priv->received, TRUE);
+  g_free (self->priv->serial_number);
+  g_free (self->priv->sw_version);
+  g_clear_pointer (&self->priv->device_clock, g_date_time_unref);
+  g_clear_pointer (&self->priv->system_clock, g_date_time_unref);
+  g_clear_pointer (&self->priv->records, g_ptr_array_unref);
 
-  g_assert (self->priv->usb_device != NULL);
-  if (!g_usb_device_open (self->priv->usb_device, &error))
-    {
-      g_warning ("Error opening device: %s", error->message);
-      goto out;
-    }
-
-  if (!g_usb_device_claim_interface (self->priv->usb_device, 0,
-          G_USB_DEVICE_CLAIM_INTERFACE_BIND_KERNEL_DRIVER,
-          &error))
-    {
-      g_warning ("Error claiming interface: %s", error->message);
-      goto out;
-    }
-
-  if (!g_usb_device_set_configuration (self->priv->usb_device, 1, &error))
-    {
-      g_warning ("Error setting configuration: %s", error->message);
-      goto out;
-    }
-
-  if (!g_usb_device_control_transfer (self->priv->usb_device,
-          G_USB_DEVICE_DIRECTION_HOST_TO_DEVICE,
-          G_USB_DEVICE_REQUEST_TYPE_CLASS,
-          G_USB_DEVICE_RECIPIENT_INTERFACE,
-          0x0a, /* SET_IDLE */
-          0,
-          0,
-          NULL, 0,
-          NULL,
-          0,
-          NULL,
-          &error))
-    {
-      g_warning ("Error setting IDLE: %s", error->message);
-      goto out;
-    }
-
-out:
-  g_clear_error (&error);
+  G_OBJECT_CLASS (og_insulinx_parent_class)->finalize (object);
 }
 
 static void
-dispose (GObject *object)
+parse_init_first (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
 {
-  OgInsulinx *self = (OgInsulinx *) object;
-  GError *error = NULL;
+  /* We could be receiving replies from a previous request that made the app
+   * crash and restart. Ignore them until we receive what we want. */
+  if (code != 0x34)
+    return;
 
-  clear_device_info (self);
-
-  if (self->priv->usb_device != NULL)
+  /* FIXME: What's the meaning of this message? In windows logs, msg[0] == 0xc
+   * but here I get 0xd. Why? */
+  if (msg[0] != 0xd || msg[1] != '\0')
     {
-      if (!g_usb_device_close (self->priv->usb_device, &error))
-        g_warning ("Error closing device: %s", error->message);
-      g_clear_error (&error);
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Prepare: wrong first request message"));
+      return;
     }
-  g_clear_object (&self->priv->usb_device);
 
-  G_OBJECT_CLASS (og_insulinx_parent_class)->dispose (object);
+  request_done (self);
 }
 
-static gboolean
-parse_serial_number (OgInsulinx *self,
-    const gchar *msg,
-    GError **error)
+static void
+parse_init_serial_number (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
 {
+  if (code != 0x6)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Prepare: wrong code for serial number"));
+      return;
+    }
+
+  g_assert (self->priv->serial_number == NULL);
   self->priv->serial_number = g_strdup (msg);
-  return TRUE;
+  request_done (self);
 }
 
-static gboolean
+static void
+parse_init_sw_version (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
+{
+  if (code != 0x35)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Prepare: wrong code for sw version"));
+      return;
+    }
+
+  g_assert (self->priv->sw_version == NULL);
+  self->priv->sw_version = g_strdup (msg);
+  request_done (self);
+}
+
+static void
+parse_init_last (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
+{
+  /* FIXME: What's the meaning of this message? */
+  if (code != 0x71 || msg[0] != 0x1 || msg[1] != '\0')
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Prepare: wrong code for sw version"));
+      return;
+    }
+
+  request_done (self);
+}
+
+static void
+parse_date (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
+{
+  /* Temporaly store those values, we'll create the GDateTime in next state. */
+  if (sscanf (msg, "%u,%u,%u", &self->priv->month, &self->priv->day,
+          &self->priv->year) != 3)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Error parsing date"));
+      return;
+    }
+
+  /* 2 digits year, they didn't learn from the Y2K bug? Let's see what happens
+   * in 2100... */
+  self->priv->year += 2000;
+}
+
+static void
+parse_time (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
+{
+  guint hour, minute;
+
+  if (sscanf (msg, "%u,%u", &hour, &minute) != 2)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Error parsing time"));
+      return;
+    }
+
+  /* We should have parsed the date in previous state */
+  self->priv->device_clock = g_date_time_new_local (
+      self->priv->year, self->priv->month, self->priv->day,
+      hour, minute, 0);
+  self->priv->system_clock = g_date_time_new_now_local ();
+}
+
+static void
 parse_result (OgInsulinx *self,
-    const gchar *msg,
-    GError **error)
+    guint8 code,
+    const gchar *msg)
 {
   guint type, month, day, year, hour, minute, glycemia;
   guint ignore;
   gint n_parsed;
 
   n_parsed = sscanf (msg, "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
-      &type,
-      &ignore, /* FIXME: What is that? */
-      &month, &day, &year,
-      &hour, &minute,
+      &type, /* Record Type */
+      &ignore, /* Record Number */
+      &month, &day, &year, /* Month Date Year */
+      &hour, &minute, /* Hour Minute */
       &ignore, /* FIXME: What is that? */
       &ignore, /* FIXME: What is that? */
       &ignore, /* FIXME: What is that? */
@@ -241,286 +689,101 @@ parse_result (OgInsulinx *self,
 
   /* FIXME: Not sure what are those results */
   if (type != 0)
-    return TRUE;
+    return;
 
   if (n_parsed != 16)
     {
-      g_set_error (error, OG_INSULINX_ERROR,
-          OG_INSULINX_ERROR_PARSER,
-          "Error parsing result");
-      return FALSE;
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Error parsing result"));
+      return;
     }
 
   year += 2000;
 
-  g_ptr_array_add (self->priv->records,
+  ptr_array_add_null_term (self->priv->records,
       og_record_new (year, month, day, hour, minute, glycemia));
-
-  return TRUE;
-}
-
-static gboolean
-parse_date (OgInsulinx *self,
-    const gchar *msg,
-    GError **error)
-{
-  /* Temporaly store those values, we'll create the GDateTime in next state. */
-  if (sscanf (msg, "%u,%u,%u", &self->priv->month, &self->priv->day,
-          &self->priv->year) != 3)
-    {
-      g_set_error (error, OG_INSULINX_ERROR,
-          OG_INSULINX_ERROR_PARSER,
-          "Error parsing date");
-      return FALSE;
-    }
-
-  self->priv->year += 2000;
-
-  return TRUE;
-}
-
-static gboolean
-parse_time (OgInsulinx *self,
-    const gchar *msg,
-    GError **error)
-{
-  guint hour, minute;
-
-  if (sscanf (msg, "%u,%u", &hour, &minute) != 2)
-    {
-      g_set_error (error, OG_INSULINX_ERROR,
-          OG_INSULINX_ERROR_PARSER,
-          "Error parsing time");
-      return FALSE;
-    }
-
-  /* We should have parsed the date in previous state */
-  self->priv->device_clock = g_date_time_new_local (
-      self->priv->year, self->priv->month, self->priv->day,
-      hour, minute, 0);
-  self->priv->system_clock = g_date_time_new_now_local ();
-
-  return TRUE;
 }
 
 static void
-refresh_return (OgInsulinx *self,
-    GError *error)
-{
-  GTask *task;
-
-  self->priv->state = -1;
-
-  if (error != NULL)
-    {
-      clear_device_info (self);
-      og_base_device_change_status ((OgBaseDevice *) self,
-          OG_BASE_DEVICE_STATUS_FAILED);
-    }
-  else
-    {
-      g_ptr_array_add (self->priv->records, NULL);
-      og_base_device_change_status ((OgBaseDevice *) self,
-          OG_BASE_DEVICE_STATUS_READY);
-    }
-
-  while ((task = g_queue_pop_head (&self->priv->refresh_tasks)) != NULL)
-    {
-      if (error != NULL)
-        g_task_return_error (task, g_error_copy (error));
-      else
-        g_task_return_boolean (task, TRUE);
-      g_object_unref (task);
-    }
-
-  g_clear_error (&error);
-}
-
-static void fetch_next (OgInsulinx *self);
-
-static void
-request_interrupt_transfer_cb (GObject *source,
-    GAsyncResult *result,
-    gpointer user_data)
-{
-  OgInsulinx *self = user_data;
-  Request *req;
-  gssize len;
-  gchar *msg;
-  guint8 msg_len;
-  gboolean fetch_more = FALSE;
-  GError *error = NULL;
-
-  len = g_usb_device_interrupt_transfer_finish (self->priv->usb_device, result,
-      &error);
-  if (len < BUFFER_SIZE)
-    {
-      refresh_return (self, error);
-      return;
-    }
-
-  req = &requests[self->priv->state];
-
-  /* Extract the msg from buffer and make sure it is 0-terminated */
-  msg_len = self->priv->buffer[1];
-  g_assert (msg_len <= BUFFER_SIZE - 3);
-  msg = (gchar *) self->priv->buffer + 2;
-  msg[msg_len] = '\0';
-
-  g_strstrip (msg);
-
-  g_debug ("got msg code 0x%02x: '%s'", self->priv->buffer[0], msg);
-
-  /* Check if more messages needs to be fetched */
-  if (req->code == 0x60)
-    {
-      if (self->priv->buffer[0] != 0x60)
-        {
-          /* FIXME: Not sure what this msg is */
-          fetch_more = TRUE;
-          goto out;
-        }
-
-      if (g_str_has_suffix (msg, "CMD FAIL!"))
-        {
-          g_set_error (&error,
-              OG_INSULINX_ERROR,
-              OG_INSULINX_ERROR_CMD_FAILED,
-              "Command failed");
-          refresh_return (self, error);
-          return;
-        }
-
-      /* If the message does NOT end with "CMD OK" then more messages
-       * needs to be fetched */
-      if (!g_str_has_suffix (msg, "CMD OK"))
-        fetch_more = TRUE;
-    }
-
-  /* Parse the message */
-  if (req->parse != NULL)
-    {
-      if (!req->parse (self, msg, &error))
-        {
-          refresh_return (self, error);
-          return;
-        }
-    }
-
-out:
-  if (fetch_more)
-    {
-      g_usb_device_interrupt_transfer_async (self->priv->usb_device,
-          0x81,
-          self->priv->buffer, BUFFER_SIZE,
-          0,
-          NULL,
-          request_interrupt_transfer_cb,
-          self);
-    }
-  else
-    {
-      fetch_next (self);
-    }
-}
-
-static void
-request_control_transfer_cb (GObject *source,
-    GAsyncResult *result,
-    gpointer user_data)
-{
-  OgInsulinx *self = user_data;
-  gssize len;
-  GError *error = NULL;
-
-  len = g_usb_device_control_transfer_finish (self->priv->usb_device, result,
-      &error);
-  if (len < BUFFER_SIZE)
-    {
-      refresh_return (self, error);
-      return;
-    }
-
-  /* Fetch the reply */
-  g_usb_device_interrupt_transfer_async (self->priv->usb_device,
-      0x81,
-      self->priv->buffer, BUFFER_SIZE,
-      0,
-      NULL,
-      request_interrupt_transfer_cb,
-      self);
-}
-
-static void
-fetch_next (OgInsulinx *self)
-{
-  Request *req;
-  gsize len;
-
-  self->priv->state++;
-  g_assert (self->priv->state >= 0);
-  g_assert ((guint) self->priv->state <= G_N_ELEMENTS (requests));
-
-  og_base_device_change_status ((OgBaseDevice *) self,
-      OG_BASE_DEVICE_STATUS_REFRESHING);
-
-  /* Are we done? */
-  if (self->priv->state == G_N_ELEMENTS (requests))
-    {
-      refresh_return (self, NULL);
-      return;
-    }
-
-  req = &requests[self->priv->state];
-  len = strlen (req->cmd);
-  g_assert (len <= BUFFER_SIZE - 2);
-
-  self->priv->buffer[0] = req->code;
-  self->priv->buffer[1] = len;
-  g_memmove (self->priv->buffer + 2, req->cmd, len);
-
-  /* Send the request */
-  g_debug ("Send request 0x%02x: '%s'", req->code, req->cmd);
-  g_usb_device_control_transfer_async (self->priv->usb_device,
-      G_USB_DEVICE_DIRECTION_HOST_TO_DEVICE,
-      G_USB_DEVICE_REQUEST_TYPE_CLASS,
-      G_USB_DEVICE_RECIPIENT_INTERFACE,
-      0x09,
-      0x0200,
-      0,
-      self->priv->buffer, BUFFER_SIZE,
-      0,
-      NULL,
-      request_control_transfer_cb,
-      self);
-}
-
-static void
-refresh_device_info_async (OgBaseDevice *base,
+prepare_async (OgBaseDevice *base,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
     gpointer user_data)
 {
-  OgInsulinx *self;
-  GTask *task;
+  OgInsulinx *self = (OgInsulinx *) base;
+  GError *error = NULL;
 
   g_return_if_fail (OG_IS_INSULINX (base));
-  self = (OgInsulinx *) base;
 
-  task = g_task_new (self, cancellable, callback, user_data);
-  g_queue_push_tail (&self->priv->refresh_tasks, task);
-
-  if (self->priv->state == -1)
+  /* FIXME: We could be nicer and support queueing tasks until device is
+   * prepared */
+  if (self->priv->status != OG_BASE_DEVICE_STATUS_NONE)
     {
-      clear_device_info (self);
-      self->priv->records = g_ptr_array_new_with_free_func (
-          (GDestroyNotify) og_record_free);
-      fetch_next (self);
+      g_task_report_new_error (self, callback, user_data, prepare_async,
+          OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_BUZY,
+          "Cannot prepare when status is not NONE");
+      return;
     }
+
+  change_status (self, OG_BASE_DEVICE_STATUS_BUZY);
+
+  g_assert (self->priv->task == NULL);
+  self->priv->task = g_task_new (self, cancellable, callback, user_data);
+
+  if (!g_usb_device_open (self->priv->usb_device, &error))
+    {
+      report_error (self, error);
+      return;
+    }
+
+  if (!g_usb_device_claim_interface (self->priv->usb_device, 0,
+          G_USB_DEVICE_CLAIM_INTERFACE_BIND_KERNEL_DRIVER,
+          &error))
+    {
+      report_error (self, error);
+      return;
+    }
+
+  if (!g_usb_device_set_configuration (self->priv->usb_device, 1, &error))
+    {
+      report_error (self, error);
+      return;
+    }
+
+  if (!g_usb_device_control_transfer (self->priv->usb_device,
+          G_USB_DEVICE_DIRECTION_HOST_TO_DEVICE,
+          G_USB_DEVICE_REQUEST_TYPE_CLASS,
+          G_USB_DEVICE_RECIPIENT_INTERFACE,
+          0x0a, /* SET_IDLE */
+          0,
+          0,
+          NULL, 0,
+          NULL,
+          0,
+          self->priv->cancellable,
+          &error))
+    {
+      report_error (self, error);
+      return;
+    }
+
+  /* Start pulling reply buffers, to get them as soon as one is ready */
+  start_interrupt_transfer (self);
+
+  /* Start our init sequence */
+  queue_request (self, 0x4, "", parse_init_first);
+  queue_request (self, 0x5, "", parse_init_serial_number);
+  queue_request (self, 0x15, "", parse_init_sw_version);
+  queue_request (self, 0x1, "", parse_init_last);
+  queue_request (self, 0x60, "$date?\r\n", parse_date);
+  queue_request (self, 0x60, "$time?\r\n", parse_time);
+  queue_request (self, 0x60, "$result?\r\n", parse_result);
 }
 
 static gboolean
-refresh_device_info_finish (OgBaseDevice *base,
+prepare_finish (OgBaseDevice *base,
     GAsyncResult *result,
     GError **error)
 {
@@ -538,13 +801,22 @@ get_name (OgBaseDevice *base)
   return "Abbott FreeStyle InsuLinx";
 }
 
+static OgBaseDeviceStatus
+get_status (OgBaseDevice *base)
+{
+  OgInsulinx *self = (OgInsulinx *) base;
+
+  g_return_val_if_fail (OG_IS_INSULINX (base), OG_BASE_DEVICE_STATUS_ERROR);
+
+  return self->priv->status;
+}
+
 static const gchar *
 get_serial_number (OgBaseDevice *base)
 {
-  OgInsulinx *self;
+  OgInsulinx *self = (OgInsulinx *) base;
 
   g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
-  self = (OgInsulinx *) base;
 
   return self->priv->serial_number;
 }
@@ -553,10 +825,9 @@ static GDateTime *
 get_clock (OgBaseDevice *base,
     GDateTime **system_clock)
 {
-  OgInsulinx *self;
+  OgInsulinx *self = (OgInsulinx *) base;
 
   g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
-  self = (OgInsulinx *) base;
 
   if (system_clock != NULL)
     *system_clock = self->priv->system_clock;
@@ -567,10 +838,9 @@ get_clock (OgBaseDevice *base,
 static const OgRecord * const *
 get_records (OgBaseDevice *base)
 {
-  OgInsulinx *self;
+  OgInsulinx *self = (OgInsulinx *) base;
 
   g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
-  self = (OgInsulinx *) base;
 
   if (self->priv->records == NULL)
     return NULL;
@@ -585,14 +855,14 @@ og_insulinx_class_init (OgInsulinxClass *klass)
   OgBaseDeviceClass *base_class = OG_BASE_DEVICE_CLASS (klass);
   GParamSpec *param_spec;
 
-  object_class->constructed = constructed;
-  object_class->dispose = dispose;
+  object_class->finalize = finalize;
   object_class->get_property = get_property;
   object_class->set_property = set_property;
 
   base_class->get_name = get_name;
-  base_class->refresh_device_info_async = refresh_device_info_async;
-  base_class->refresh_device_info_finish = refresh_device_info_finish;
+  base_class->get_status = get_status;
+  base_class->prepare_async = prepare_async;
+  base_class->prepare_finish = prepare_finish;
   base_class->get_serial_number = get_serial_number;
   base_class->get_clock = get_clock;
   base_class->get_records = get_records;

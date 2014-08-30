@@ -17,7 +17,7 @@ def print_msg(way, text):
       msg += chr(n)
     else:
       msg += hex(n)
-  print('%s: code=%s, msg="%s"' % (way, hex(code), msg))
+  print('%s: code=0x%02x, msg="%s"' % (way, code, msg))
 
 def parse(filename):
   with open(filename) as f:
