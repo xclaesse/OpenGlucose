@@ -795,6 +795,73 @@ prepare_finish (OgBaseDevice *base,
   return g_task_propagate_boolean (G_TASK (result), error);
 }
 
+static void
+parse_nothing (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
+{
+  report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+      OG_BASE_DEVICE_ERROR_PARSER,
+      "No message was expected"));
+}
+
+static void
+sync_clock_async (OgBaseDevice *base,
+    GCancellable *cancellable,
+    GAsyncReadyCallback callback,
+    gpointer user_data)
+{
+  OgInsulinx *self = (OgInsulinx *) base;
+  GDateTime *now;
+  gchar *cmd;
+
+  g_return_if_fail (OG_IS_INSULINX (base));
+
+  /* FIXME: We could be nicer and support queueing tasks until device is
+   * prepared */
+  if (self->priv->status != OG_BASE_DEVICE_STATUS_READY)
+    {
+      g_task_report_new_error (self, callback, user_data, prepare_async,
+          OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_BUZY,
+          "Cannot sync clock when status is not READY");
+      return;
+    }
+
+  change_status (self, OG_BASE_DEVICE_STATUS_BUZY);
+
+  g_assert (self->priv->task == NULL);
+  self->priv->task = g_task_new (self, cancellable, callback, user_data);
+
+  now = g_date_time_new_now_local ();
+
+  cmd = g_strdup_printf ("$date,%u,%u,%u\r\n",
+      g_date_time_get_month (now),
+      g_date_time_get_day_of_month (now),
+      g_date_time_get_year (now) - 2000);
+  queue_request (self, 0x60, cmd, parse_nothing);
+  g_free (cmd);
+
+  cmd = g_strdup_printf ("$time,%u,%u\r\n",
+      g_date_time_get_hour (now),
+      g_date_time_get_minute (now));
+  queue_request (self, 0x60, cmd, parse_nothing);
+  g_free (cmd);
+
+  g_date_time_unref (now);
+}
+
+static gboolean
+sync_clock_finish (OgBaseDevice *base,
+    GAsyncResult *result,
+    GError **error)
+{
+  g_return_val_if_fail (OG_IS_INSULINX (base), FALSE);
+  g_return_val_if_fail (g_task_is_valid (result, base), FALSE);
+
+  return g_task_propagate_boolean (G_TASK (result), error);
+}
+
 static const gchar *
 get_name (OgBaseDevice *base)
 {
@@ -865,6 +932,8 @@ og_insulinx_class_init (OgInsulinxClass *klass)
   base_class->get_status = get_status;
   base_class->prepare_async = prepare_async;
   base_class->prepare_finish = prepare_finish;
+  base_class->sync_clock_async = sync_clock_async;
+  base_class->sync_clock_finish = sync_clock_finish;
   base_class->get_serial_number = get_serial_number;
   base_class->get_clock = get_clock;
   base_class->get_records = get_records;

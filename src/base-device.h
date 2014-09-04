@@ -59,12 +59,20 @@ struct _OgBaseDeviceClass {
   OgBaseDeviceStatus (*get_status) (OgBaseDevice *self);
 
   void (*prepare_async) (OgBaseDevice *self,
-    GCancellable *cancellable,
-    GAsyncReadyCallback callback,
-    gpointer user_data);
+      GCancellable *cancellable,
+      GAsyncReadyCallback callback,
+      gpointer user_data);
   gboolean (*prepare_finish) (OgBaseDevice *self,
-    GAsyncResult *result,
-    GError **error);
+      GAsyncResult *result,
+      GError **error);
+
+  void (*sync_clock_async) (OgBaseDevice *self,
+      GCancellable *cancellable,
+      GAsyncReadyCallback callback,
+      gpointer user_data);
+  gboolean (*sync_clock_finish) (OgBaseDevice *self,
+      GAsyncResult *result,
+      GError **error);
 
   /* Those vfunc can return NULL until the first call to
    * prepare_async() succeeds */
@@ -86,6 +94,14 @@ void og_base_device_prepare_async (OgBaseDevice *self,
     GAsyncReadyCallback callback,
     gpointer user_data);
 gboolean og_base_device_prepare_finish (OgBaseDevice *self,
+    GAsyncResult *result,
+    GError **error);
+
+void og_base_device_sync_clock_async (OgBaseDevice *self,
+    GCancellable *cancellable,
+    GAsyncReadyCallback callback,
+    gpointer user_data);
+gboolean og_base_device_sync_clock_finish (OgBaseDevice *self,
     GAsyncResult *result,
     GError **error);
 

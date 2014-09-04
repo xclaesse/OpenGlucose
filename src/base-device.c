@@ -136,6 +136,39 @@ og_base_device_prepare_finish (OgBaseDevice *self,
   return klass->prepare_finish (self, result, error);
 }
 
+void
+og_base_device_sync_clock_async (OgBaseDevice *self,
+    GCancellable *cancellable,
+    GAsyncReadyCallback callback,
+    gpointer user_data)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_if_fail (OG_IS_BASE_DEVICE (self));
+  g_return_if_fail (cancellable == NULL || G_IS_CANCELLABLE (cancellable));
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_if_fail (klass->sync_clock_async != NULL);
+
+  klass->sync_clock_async (self, cancellable, callback, user_data);
+}
+
+gboolean
+og_base_device_sync_clock_finish (OgBaseDevice *self,
+    GAsyncResult *result,
+    GError **error)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), FALSE);
+  g_return_val_if_fail (G_IS_ASYNC_RESULT (result), FALSE);
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_val_if_fail (klass->sync_clock_finish != NULL, FALSE);
+
+  return klass->sync_clock_finish (self, result, error);
+}
+
 const gchar *
 og_base_device_get_serial_number (OgBaseDevice *self)
 {

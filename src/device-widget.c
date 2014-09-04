@@ -450,6 +450,7 @@ static void
 sync_clock_clicked_cb (GtkWidget *button,
     OgDeviceWidget *self)
 {
+  og_base_device_sync_clock_async (self->priv->device, NULL, NULL, NULL);
 }
 
 static void
