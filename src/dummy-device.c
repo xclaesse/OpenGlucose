@@ -152,6 +152,22 @@ get_records (OgBaseDevice *base)
   return (const OgRecord * const *) self->priv->records->pdata;
 }
 
+static const gchar *
+get_first_name (OgBaseDevice *base)
+{
+  g_return_val_if_fail (OG_IS_DUMMY_DEVICE (base), NULL);
+
+  return "Juliet";
+}
+
+static const gchar *
+get_last_name (OgBaseDevice *base)
+{
+  g_return_val_if_fail (OG_IS_DUMMY_DEVICE (base), NULL);
+
+  return "Capulet";
+}
+
 static void
 og_dummy_device_class_init (OgDummyDeviceClass *klass)
 {
@@ -165,6 +181,8 @@ og_dummy_device_class_init (OgDummyDeviceClass *klass)
   base_class->get_serial_number = get_serial_number;
   base_class->get_clock = get_clock;
   base_class->get_records = get_records;
+  base_class->get_first_name = get_first_name;
+  base_class->get_last_name = get_last_name;
 
   g_type_class_add_private (object_class, sizeof (OgDummyDevicePrivate));
 }
