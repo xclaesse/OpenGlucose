@@ -4,7 +4,6 @@
 #include <gtk/gtk.h>
 
 #include "base-device.h"
-#include "openglucose-resources.h"
 
 G_BEGIN_DECLS
 

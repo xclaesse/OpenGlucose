@@ -84,11 +84,23 @@ static void
 startup (GApplication *app)
 {
   OgApplication *self = (OgApplication *) app;
+  GtkCssProvider *provider;
+  GFile *file;
   GPtrArray *devices;
   guint i;
   GError *error = NULL;
 
   G_APPLICATION_CLASS (og_application_parent_class)->startup (app);
+
+  /* There is no gtk_css_provider_load_from_resource() yet.
+   * See https://bugzilla.gnome.org/show_bug.cgi?id=711293 */
+  provider = gtk_css_provider_new ();
+  file = g_file_new_for_uri (
+      "resource:///org/freedesktop/OpenGlucose/src/openglucose.css");
+  gtk_css_provider_load_from_file (provider, file, NULL);
+  gtk_style_context_add_provider_for_screen (gdk_screen_get_default (),
+      GTK_STYLE_PROVIDER (provider),
+      GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
   self->window = og_main_window_new ((GtkApplication *) self);
   gtk_widget_show (self->window);
@@ -121,6 +133,9 @@ startup (GApplication *app)
       og_main_window_add_device ((OgMainWindow *) self->window, base);
       g_object_unref (base);
     }
+
+  g_object_unref (provider);
+  g_object_unref (file);
 }
 
 static void

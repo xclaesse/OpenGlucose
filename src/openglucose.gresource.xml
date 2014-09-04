@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/org/freedesktop/OpenGlucose">
-    <file>src/main-window.html</file>
+    <file>src/openglucose.css</file>
+    <file>src/chart.html</file>
+    <file>src/modal-day-chart.js</file>
+    <file>src/average-chart.js</file>
   </gresource>
 </gresources>

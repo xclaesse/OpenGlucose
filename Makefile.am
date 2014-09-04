@@ -20,9 +20,10 @@ EXTRA_DIST = \
 	m4/linker.m4 \
 	m4/tp-compiler-flag.m4 \
 	m4/tp-compiler-warnings.m4 \
-	src/main-window.css \
-	src/main-window.html \
-	src/main-window.js \
+	src/average-chart.js \
+	src/chart.html \
+	src/modal-day-chart.js \
+	src/openglucose.css \
 	src/openglucose.gresource.xml \
 	$(jqplot_DATA) \
 	$(jqplotplugins_DATA) \
@@ -50,6 +51,7 @@ src/openglucose-resources.h: src/openglucose.gresource.xml $(shell $(GLIB_COMPIL
 
 openglucose_SOURCES = \
 	src/base-device.c src/base-device.h \
+	src/device-widget.c src/device-widget.h \
 	src/dummy-device.c src/dummy-device.h \
 	src/insulinx.c src/insulinx.h \
 	src/main.c \
