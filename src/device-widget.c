@@ -339,6 +339,9 @@ update_status (OgDeviceWidget *self)
         gtk_label_set_text (GTK_LABEL (self->priv->info_bar_label),
             _("An error occured"));
         gtk_widget_show (self->priv->info_bar);
+
+        g_clear_pointer (&self->priv->spinner,
+            (GDestroyNotify) gtk_widget_destroy);
         break;
     }
 }
@@ -476,8 +479,7 @@ prepare_cb (GObject *source,
       return;
     }
 
-  gtk_widget_destroy (self->priv->spinner);
-  self->priv->spinner = NULL;
+  g_clear_pointer (&self->priv->spinner, (GDestroyNotify) gtk_widget_destroy);
 
   /* top hbox */
   w = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
