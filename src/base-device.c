@@ -208,3 +208,29 @@ og_base_device_get_records (OgBaseDevice *self)
 
   return klass->get_records (self);
 }
+
+const gchar *
+og_base_device_get_first_name (OgBaseDevice *self)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_val_if_fail (klass->get_first_name != NULL, NULL);
+
+  return klass->get_first_name (self);
+}
+
+const gchar *
+og_base_device_get_last_name (OgBaseDevice *self)
+{
+  OgBaseDeviceClass *klass;
+
+  g_return_val_if_fail (OG_IS_BASE_DEVICE (self), NULL);
+
+  klass = OG_BASE_DEVICE_GET_CLASS (self);
+  g_return_val_if_fail (klass->get_last_name != NULL, NULL);
+
+  return klass->get_last_name (self);
+}

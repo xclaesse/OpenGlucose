@@ -80,6 +80,8 @@ struct _OgBaseDeviceClass {
   GDateTime *(*get_clock) (OgBaseDevice *self,
       GDateTime **system_clock);
   const OgRecord * const *(*get_records) (OgBaseDevice *self);
+  const gchar *(*get_first_name) (OgBaseDevice *self);
+  const gchar *(*get_last_name) (OgBaseDevice *self);
 };
 
 GType og_base_device_get_type (void) G_GNUC_CONST;
@@ -109,6 +111,8 @@ const gchar *og_base_device_get_serial_number (OgBaseDevice *self);
 GDateTime *og_base_device_get_clock (OgBaseDevice *self,
     GDateTime **system_clock);
 const OgRecord * const *og_base_device_get_records (OgBaseDevice *self);
+const gchar *og_base_device_get_first_name (OgBaseDevice *self);
+const gchar *og_base_device_get_last_name (OgBaseDevice *self);
 
 G_END_DECLS
 

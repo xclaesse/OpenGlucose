@@ -108,6 +108,8 @@ struct _OgInsulinxPrivate
   GDateTime *device_clock;
   GDateTime *system_clock;
   GPtrArray *records;
+  gchar *first_name;
+  gchar *last_name;
 
   guint year, month, day;
 };
@@ -708,6 +710,33 @@ parse_result (OgInsulinx *self,
 }
 
 static void
+parse_ptname (OgInsulinx *self,
+    guint8 code,
+    const gchar *msg)
+{
+  gchar **names;
+
+  names = g_strsplit (msg, ",", 3);
+  if (names == NULL || g_strv_length (names) != 3)
+    {
+      report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
+          OG_BASE_DEVICE_ERROR_PARSER,
+          "Error parsing patient name"));
+      return;
+    }
+
+  g_assert (self->priv->first_name == NULL);
+  self->priv->first_name = g_strdup (names[0]);
+
+  g_assert (self->priv->last_name == NULL);
+  self->priv->last_name = g_strdup (names[1]);
+
+  /* names[2] is the middle initial, ignore */
+
+  g_strfreev (names);
+}
+
+static void
 prepare_async (OgBaseDevice *base,
     GCancellable *cancellable,
     GAsyncReadyCallback callback,
@@ -782,6 +811,7 @@ prepare_async (OgBaseDevice *base,
   queue_request (self, 0x60, "$date?\r\n", parse_date);
   queue_request (self, 0x60, "$time?\r\n", parse_time);
   queue_request (self, 0x60, "$result?\r\n", parse_result);
+  queue_request (self, 0x60, "$ptname?\r\n", parse_ptname);
 }
 
 static gboolean
@@ -917,6 +947,26 @@ get_records (OgBaseDevice *base)
   return (const OgRecord * const *) self->priv->records->pdata;
 }
 
+static const gchar *
+get_first_name (OgBaseDevice *base)
+{
+  OgInsulinx *self = (OgInsulinx *) base;
+
+  g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
+
+  return self->priv->first_name;
+}
+
+static const gchar *
+get_last_name (OgBaseDevice *base)
+{
+  OgInsulinx *self = (OgInsulinx *) base;
+
+  g_return_val_if_fail (OG_IS_INSULINX (base), NULL);
+
+  return self->priv->last_name;
+}
+
 static void
 og_insulinx_class_init (OgInsulinxClass *klass)
 {
@@ -937,6 +987,8 @@ og_insulinx_class_init (OgInsulinxClass *klass)
   base_class->get_serial_number = get_serial_number;
   base_class->get_clock = get_clock;
   base_class->get_records = get_records;
+  base_class->get_first_name = get_first_name;
+  base_class->get_last_name = get_last_name;
 
   g_type_class_add_private (object_class, sizeof (OgInsulinxPrivate));
 

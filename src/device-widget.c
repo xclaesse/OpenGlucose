@@ -390,16 +390,16 @@ add_info (OgDeviceWidget *self,
 static void
 add_info_entry (OgDeviceWidget *self,
     GtkGrid *grid,
-    const gchar *placeholder,
+    const gchar *title,
     const gchar *value)
 {
   GtkWidget *entry;
 
   entry = gtk_entry_new ();
-  gtk_entry_set_placeholder_text (GTK_ENTRY (entry), placeholder);
+  gtk_entry_set_placeholder_text (GTK_ENTRY (entry), title);
   gtk_entry_set_text (GTK_ENTRY (entry), value);
 
-  add_info_widget (self, grid, entry);
+  add_info_widget_with_title (self, grid, title, entry);
 }
 
 static void
@@ -494,8 +494,10 @@ prepare_cb (GObject *source,
   info_grid = (GtkGrid *) w;
 
   /* Info: name */
-  add_info_entry (self, info_grid, _("First name"), "");
-  add_info_entry (self, info_grid, _("Last name"), "");
+  add_info_entry (self, info_grid, _("First name"),
+      og_base_device_get_first_name (self->priv->device));
+  add_info_entry (self, info_grid, _("Last name"),
+      og_base_device_get_last_name (self->priv->device));
 
   /* Info: time span selector */
   w = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
