@@ -452,7 +452,7 @@ interrupt_transfer_cb (GObject *source,
   msg[msg_len] = '\0';
 
   DEBUG_MSG ("Received", code, msg);
-  parser_common (self, self->priv->receive_buffer[0], msg);
+  parser_common (self, code, msg);
 
   /* continue pulling */
   if (self->priv->status != OG_BASE_DEVICE_STATUS_ERROR)
@@ -614,7 +614,7 @@ parse_init_last (OgInsulinx *self,
     {
       report_error (self, g_error_new (OG_BASE_DEVICE_ERROR,
           OG_BASE_DEVICE_ERROR_PARSER,
-          "Prepare: wrong code for sw version"));
+          "Prepare: wrong last request message"));
       return;
     }
 
@@ -626,7 +626,7 @@ parse_date (OgInsulinx *self,
     guint8 code,
     const gchar *msg)
 {
-  /* Temporaly store those values, we'll create the GDateTime in next state. */
+  /* Temporaly store those values, we'll create the GDateTime in next request. */
   if (sscanf (msg, "%u,%u,%u", &self->priv->month, &self->priv->day,
           &self->priv->year) != 3)
     {
@@ -656,11 +656,12 @@ parse_time (OgInsulinx *self,
       return;
     }
 
-  /* We should have parsed the date in previous state */
+  self->priv->system_clock = g_date_time_new_now_local ();
+
+  /* We should have parsed the date in previous request */
   self->priv->device_clock = g_date_time_new_local (
       self->priv->year, self->priv->month, self->priv->day,
       hour, minute, 0);
-  self->priv->system_clock = g_date_time_new_now_local ();
 }
 
 static void
@@ -673,10 +674,10 @@ parse_result (OgInsulinx *self,
   gint n_parsed;
 
   n_parsed = sscanf (msg, "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
-      &type, /* Record Type */
+      &type,
       &ignore, /* Record Number */
-      &month, &day, &year, /* Month Date Year */
-      &hour, &minute, /* Hour Minute */
+      &month, &day, &year,
+      &hour, &minute,
       &ignore, /* FIXME: What is that? */
       &ignore, /* FIXME: What is that? */
       &ignore, /* FIXME: What is that? */
@@ -699,6 +700,7 @@ parse_result (OgInsulinx *self,
       return;
     }
 
+  /* Fix 2 digits year */
   year += 2000;
 
   ptr_array_add_null_term (self->priv->records,
