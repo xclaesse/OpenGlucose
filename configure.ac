@@ -22,9 +22,8 @@ m4_define([openglucose_version],
               [openglucose_base_version].[openglucose_nano_version])])
 
 AC_INIT([OpenGlucose], [openglucose_version], [])
-
 AC_CONFIG_MACRO_DIR([m4])
-
+AC_CONFIG_SRCDIR([configure.ac])
 AM_INIT_AUTOMAKE([1.11 -Wno-portability foreign subdir-objects])
 AC_CONFIG_HEADERS(config.h)
 

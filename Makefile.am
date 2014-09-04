@@ -4,13 +4,13 @@ DISTCHECK_CONFIGURE_FLAGS = --disable-debug
 
 jqplotdir = $(datadir)/openglucose/jqplot
 jqplot_DATA = \
-	jqplot/*.min.css \
-	jqplot/*.min.js \
+	$(srcdir)/jqplot/*.min.css \
+	$(srcdir)/jqplot/*.min.js \
 	$(NULL)
 
 jqplotpluginsdir = $(datadir)/openglucose/jqplot/plugins
 jqplotplugins_DATA = \
-	jqplot/plugins/*.min.js \
+	$(srcdir)/jqplot/plugins/*.min.js \
 	$(NULL)
 
 EXTRA_DIST = \
@@ -37,13 +37,13 @@ AM_CPPFLAGS = \
 
 bin_PROGRAMS = openglucose
 
-src/openglucose-resources.c: src/openglucose.gresource.xml $(shell $(GLIB_COMPILE_RESOURCES) --generate-dependencies src/openglucose.gresource.xml)
+src/openglucose-resources.c: src/openglucose.gresource.xml $(shell $(GLIB_COMPILE_RESOURCES) --generate-dependencies $(srcdir)/src/openglucose.gresource.xml)
 	$(AM_V_GEN)$(GLIB_COMPILE_RESOURCES) --target=$@ \
 		--sourcedir=$(srcdir) \
 		--generate-source \
 		$<
 
-src/openglucose-resources.h: src/openglucose.gresource.xml $(shell $(GLIB_COMPILE_RESOURCES) --generate-dependencies src/openglucose.gresource.xml)
+src/openglucose-resources.h: src/openglucose.gresource.xml $(shell $(GLIB_COMPILE_RESOURCES) --generate-dependencies $(srcdir)/src/openglucose.gresource.xml)
 	$(AM_V_GEN)$(GLIB_COMPILE_RESOURCES) --target=$@ \
 		--sourcedir=$(srcdir) \
 		--generate-header \
@@ -73,5 +73,5 @@ CLEANFILES = $(BUILT_SOURCES)
 doc_DATA = README AUTHORS COPYING
 
 udevdir = $(UDEV_DIR)/rules.d
-udev_DATA = data/60-insulinx.rules
+udev_DATA = $(srcdir)/data/60-insulinx.rules
 
