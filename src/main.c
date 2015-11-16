@@ -28,7 +28,6 @@ typedef struct
   /* Owned GUsbDevice -> owned OgBaseDevice */
   GHashTable *devices_table;
   GUsbContext *context;
-  GUsbDeviceList *list;
 } OgApplication;
 
 typedef struct
@@ -109,17 +108,15 @@ startup (GApplication *app)
   if (self->context == NULL)
     g_error ("Error creating USB context: %s", error->message);
 
-  self->list = g_usb_device_list_new (self->context);
-  g_usb_device_list_coldplug (self->list);
-
-  devices = g_usb_device_list_get_devices (self->list);
+  g_usb_context_enumerate (self->context);
+  devices = g_usb_context_get_devices (self->context);
   for (i = 0; i < devices->len; i++)
     add_device (self, g_ptr_array_index (devices, i));
   g_ptr_array_unref (devices);
 
-  g_signal_connect_swapped (self->list, "device-added",
+  g_signal_connect_swapped (self->context, "device-added",
       G_CALLBACK (add_device), self);
-  g_signal_connect_swapped (self->list, "device-removed",
+  g_signal_connect_swapped (self->context, "device-removed",
       G_CALLBACK (remove_device), self);
 
   if (g_getenv ("OPENGLUCOSE_DUMMY_DEVICE") != NULL)
@@ -138,7 +135,6 @@ shutdown (GApplication *app)
   OgApplication *self = (OgApplication *) app;
 
   g_hash_table_unref (self->devices_table);
-  g_object_unref (self->list);
   g_object_unref (self->context);
 
   G_APPLICATION_CLASS (og_application_parent_class)->shutdown (app);
