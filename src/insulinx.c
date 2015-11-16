@@ -716,6 +716,14 @@ parse_ptname (OgInsulinx *self,
 {
   gchar **names;
 
+  if (msg == NULL || *msg == '\0')
+    {
+      DEBUG ("Patient name not set");
+      self->priv->first_name = g_strdup ("");
+      self->priv->last_name = g_strdup ("");
+      return;
+    }
+
   names = g_strsplit (msg, ",", 3);
   if (names == NULL || g_strv_length (names) != 3)
     {
