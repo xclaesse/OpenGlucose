@@ -1,0 +1,6 @@
+ACTION!="add|change", GOTO="openglucose_end"
+
+# Abbott InsuLinx Serial Cable
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a61", ATTRS{idProduct}=="3460", TAG+="uaccess"
+
+LABEL="openglucose_end"
