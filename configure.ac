@@ -92,7 +92,7 @@ GLIB_REQUIRED=2.40.0
 AC_DEFINE([GLIB_VERSION_MIN_REQUIRED], [GLIB_VERSION_2_40], [Ignore post 2.40 deprecations])
 AC_DEFINE([GLIB_VERSION_MAX_ALLOWED], [GLIB_VERSION_2_40], [Prevent post 2.40 APIs])
 
-GUSB_REQUIRED=0.1.6
+GUSB_REQUIRED=0.2.0
 AC_DEFINE([G_USB_API_IS_SUBJECT_TO_CHANGE], [1], [Acknowledge that it is unstable API])
 
 GTK_REQUIRED=3.10
@@ -123,12 +123,14 @@ AC_ARG_ENABLE(debug,
 AS_IF([test x$enable_debug = xyes],
   [AC_DEFINE([ENABLE_DEBUG], [], [Enable debug code])])
 
-AC_MSG_CHECKING([udev dir])
-UDEV_DIR=`pkg-config --variable=udevdir udev`
+AC_MSG_CHECKING([for udev directory])
+PKG_CHECK_VAR([UDEV_DIR], [udev], [udevdir], ,
+  AC_MSG_FAILURE([Unable to find udev directory path.]))
 AC_MSG_RESULT([$UDEV_DIR])
-AC_SUBST(UDEV_DIR)
 
-GLIB_COMPILE_RESOURCES=`$PKG_CONFIG gio-2.0 --variable=glib_compile_resources`
-AC_SUBST(GLIB_COMPILE_RESOURCES)
+AC_MSG_CHECKING([for glib_compile_resources])
+PKG_CHECK_VAR([GLIB_COMPILE_RESOURCES], [gio-2.0], [glib_compile_resources], ,
+  AC_MSG_FAILURE([Unable to find glib_compile_resources]))
+AC_MSG_RESULT([found])
 
 AC_OUTPUT(Makefile)
