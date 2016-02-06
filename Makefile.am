@@ -73,5 +73,5 @@ CLEANFILES = $(BUILT_SOURCES)
 doc_DATA = README AUTHORS COPYING
 
 udevdir = $(UDEV_DIR)/rules.d
-udev_DATA = $(srcdir)/data/60-insulinx.rules
+udev_DATA = $(srcdir)/data/60-openglucose.rules
 
