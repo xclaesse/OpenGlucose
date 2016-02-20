@@ -2,7 +2,7 @@ OpenGlucose
 ===========
 
 OpenGlucose is an application for diabetics that reads data from supported
-glucometer devices and display statistics and graphs.
+glucometer devices and displays statistics and graphs.
 
 DISCLAIMER
 ==========
@@ -19,5 +19,28 @@ SUPPORTED DEVICES
 
 Please contribute to this project if you own another device. Sending USB logs[1]
 from the windows application can help.
+
+
+INSTALLATION  
+============
+(tested with Ubuntu Wily)
+
+
+
+Clone the source directory :
+$ git clone https://github.com/xclaesse/OpenGlucose
+
+Install the dependencies and compilation utilities :
+# apt install dh-autoreconf gnome-devel libgusb-dev libgtk-3-dev libwebkit2gtk-3.0-dev
+
+Compilation/installation :
+$ ./autogen.sh
+$ ./configure
+$ make
+
+Enjoy :
+$ ./openglucose
+
+
 
 [1] http://sourceforge.net/projects/usbsnoop/
